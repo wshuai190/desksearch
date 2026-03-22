@@ -1,0 +1,93 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+            artifact: "dist/electron/DeskSearch-*.dmg"
+            data_sep: ":"
+          - os: windows-latest
+            platform: win
+            artifact: "dist/electron/DeskSearch Setup *.exe"
+            data_sep: ";"
+          - os: ubuntu-latest
+            platform: linux
+            artifact: "dist/electron/DeskSearch-*.AppImage"
+            data_sep: ":"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Python dependencies
+        run: pip install -e ".[dev]" && pip install pyinstaller
+        shell: bash
+
+      - name: Build frontend
+        working-directory: src/ui
+        run: npm ci && npm run build
+
+      - name: Bundle backend with PyInstaller
+        shell: bash
+        run: |
+          SEP="${{ matrix.data_sep }}"
+          pyinstaller --onedir --name desksearch-backend \
+            --hidden-import desksearch --hidden-import desksearch.api \
+            --hidden-import desksearch.api.server --hidden-import desksearch.api.routes \
+            --hidden-import desksearch.api.schemas --hidden-import desksearch.core \
+            --hidden-import desksearch.core.search --hidden-import desksearch.core.bm25 \
+            --hidden-import desksearch.core.dense --hidden-import desksearch.core.fusion \
+            --hidden-import desksearch.core.snippets --hidden-import desksearch.indexer \
+            --hidden-import desksearch.indexer.pipeline --hidden-import desksearch.indexer.parsers \
+            --hidden-import desksearch.indexer.chunker --hidden-import desksearch.indexer.embedder \
+            --hidden-import desksearch.indexer.store --hidden-import desksearch.indexer.watcher \
+            --hidden-import desksearch.config --hidden-import desksearch.onboarding \
+            --hidden-import desksearch.daemon --hidden-import desksearch.plugins \
+            --hidden-import uvicorn --hidden-import fastapi --hidden-import tantivy \
+            --hidden-import faiss --hidden-import onnxruntime --hidden-import tokenizers \
+            --hidden-import huggingface_hub \
+            --collect-all desksearch --collect-all tantivy --collect-all onnxruntime \
+            --collect-all tokenizers \
+            --exclude-module torch --exclude-module sentence_transformers \
+            --exclude-module scipy --exclude-module sklearn --exclude-module transformers \
+            --add-data "src/ui/dist${SEP}ui/dist" \
+            --noconfirm \
+            src/desksearch/__main__.py
+
+      - name: Build Electron app
+        working-directory: electron
+        run: npm ci && npm run dist:${{ matrix.platform }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desksearch-${{ matrix.platform }}
+          path: ${{ matrix.artifact }}
+
+      - name: Upload to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}
