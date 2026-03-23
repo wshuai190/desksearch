@@ -258,7 +258,10 @@ def _parse_archive(path: Path) -> str:
                         try:
                             f = tf.extractfile(member)
                             if f:
-                                raw = f.read().decode("utf-8", errors="replace")
+                                try:
+                                    raw = f.read().decode("utf-8", errors="replace")
+                                finally:
+                                    f.close()  # Explicitly release the stream
                                 if raw.strip():
                                     parts.append(f"[{member.name}]\n{raw[:50000]}")
                                     count += 1

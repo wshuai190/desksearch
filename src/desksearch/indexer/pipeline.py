@@ -4,10 +4,17 @@ Orchestrates file discovery, parsing, chunking, embedding, and storage.
 Yields status updates for progress reporting.
 
 Batch embedding: instead of embedding per-file, chunks are accumulated
-across files and embedded in batches of up to 64 for 3-5x throughput.
+across files and embedded in batches of up to BATCH_EMBED_SIZE for 3-5x
+throughput.
+
+Parallel parsing: files are parsed + chunked in a thread pool while the
+main thread embeds the previous batch. ONNX Runtime releases the GIL
+during session.run(), so parse threads execute concurrently with embedding.
 """
 import logging
 import time
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -20,11 +27,29 @@ from desksearch.indexer.chunker import chunk_text
 from desksearch.indexer.embedder import Embedder
 from desksearch.indexer.parsers import parse_file
 from desksearch.indexer.store import MetadataStore
+from desksearch.utils.memory import log_memory, log_memory_delta
 
 logger = logging.getLogger(__name__)
 
 # Max chunks to accumulate before flushing an embedding batch.
-BATCH_EMBED_SIZE = 64
+# Larger = fewer flush calls, better ONNX throughput.
+BATCH_EMBED_SIZE = 256
+
+# Number of parallel file-parse workers.
+# Parsing is I/O + CPU bound; 4 threads saturates disk while leaving cores
+# for ONNX.  Keep it ≤ physical cores / 2 to avoid competing with ONNX GEMM.
+PARSE_WORKERS = 4
+
+# How many parse futures to keep in flight ahead of the embed cursor.
+# Larger = better parse/embed overlap, more peak RAM for pending text.
+PARSE_LOOKAHEAD = 16
+
+# Per-file timeout for parse + chunk (seconds).
+PARSE_TIMEOUT_SEC = 30
+
+# Inner ONNX batch size: how many sequences per session.run() call.
+# 128 uses ~150 MB peak on all-MiniLM-L6-v2 — safe for 8 GB Mac mini.
+ONNX_INNER_BATCH = 128
 
 
 class StatusType(Enum):
@@ -55,6 +80,41 @@ class _PendingFile:
     path: Path
     chunks: list  # list of Chunk dataclass instances
     chunk_texts: list[str] = field(default_factory=list)
+
+
+def _parse_and_chunk_file(
+    file_path: Path,
+    chunk_size: int,
+    chunk_overlap: int,
+) -> tuple[Optional[_PendingFile], Optional[str]]:
+    """Parse and chunk a single file in a thread-pool worker.
+
+    Returns (_PendingFile, None) on success or (None, error_message) on failure.
+    Thread-safe: uses only read-only shared state (_PARSERS registry).
+    """
+    try:
+        text = parse_file(file_path)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"parse exception: {exc}"
+
+    if text is None:
+        return None, "parse_failed"
+
+    try:
+        chunks = chunk_text(
+            text,
+            source_file=str(file_path),
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return None, f"chunk exception: {exc}"
+
+    if not chunks:
+        return None, "no_chunks"
+
+    chunk_texts = [c.text for c in chunks]
+    return _PendingFile(path=file_path, chunks=chunks, chunk_texts=chunk_texts), None
 
 
 class IndexingPipeline:
@@ -192,12 +252,13 @@ class IndexingPipeline:
         """Index all files in a directory.
 
         Collects chunks across files and embeds them in batches of up to
-        BATCH_EMBED_SIZE for 3-5x throughput improvement.
+        BATCH_EMBED_SIZE for throughput improvement.
         Yields status updates throughout.
 
         Returns a summary dict with counts.
         """
         directory = directory.resolve()
+        mem_start = log_memory("index-directory-start")
 
         # Discover
         yield IndexStatus(StatusType.DISCOVERY, str(directory), "Scanning...")
@@ -234,7 +295,10 @@ class IndexingPipeline:
                 return []
 
             t0 = time.perf_counter()
-            embeddings = self.embedder.embed(pending_chunk_texts, batch_size=BATCH_EMBED_SIZE)
+            # Use ONNX_INNER_BATCH for the actual session.run() call size so
+            # we control peak memory while still amortising call overhead over
+            # a large accumulated batch.
+            embeddings = self.embedder.embed(pending_chunk_texts, batch_size=ONNX_INNER_BATCH)
             embed_ms = (time.perf_counter() - t0) * 1000
             logger.info("batch embed: %.0fms (%d chunks)", embed_ms, len(pending_chunk_texts))
 
@@ -273,76 +337,110 @@ class IndexingPipeline:
             pending_chunk_texts.clear()
             return completed
 
-        # Process files, accumulating chunks for batch embedding
-        for i, file_path in enumerate(files_to_index):
-            file_num = i + 1
+        # ------------------------------------------------------------------
+        # Parallel parse + chunk loop with sliding lookahead window.
+        #
+        # PARSE_WORKERS threads parse+chunk files concurrently.  Because ONNX
+        # Runtime releases the GIL during session.run(), parse threads run
+        # *truly in parallel* with embedding, giving us free pipeline overlap.
+        #
+        # Ordering guarantee: futures are kept in a deque and consumed in
+        # submission order, so progress statuses remain sequential.
+        # ------------------------------------------------------------------
+        import concurrent.futures as _cf
 
-            # Parse (with timeout for large files)
-            yield IndexStatus(StatusType.PARSING, str(file_path), current=file_num, total=len(files_to_index))
-            t0 = time.perf_counter()
-            try:
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(parse_file, file_path)
-                    text = future.result(timeout=30)  # 30s max per file
-            except concurrent.futures.TimeoutError:
-                yield IndexStatus(StatusType.SKIPPED, str(file_path), "Skipped: parsing took >30s")
-                errors += 1
-                continue
-            except Exception as e:
-                yield IndexStatus(StatusType.ERROR, str(file_path), str(e))
-                errors += 1
-                continue
+        file_iter = iter(files_to_index)
+        n_total = len(files_to_index)
 
-            if text is None:
-                errors += 1
-                continue
-            parse_ms = (time.perf_counter() - t0) * 1000
-            logger.info("[%s] parse: %.0fms (%d chars)", file_path.name, parse_ms, len(text))
+        with ThreadPoolExecutor(max_workers=PARSE_WORKERS) as executor:
+            # Sliding window: deque of (file_path, Future)
+            pending_futures: deque[tuple[Path, Future]] = deque()
 
-            # Chunk
-            t0 = time.perf_counter()
-            chunks = chunk_text(
-                text,
-                source_file=str(file_path),
-                chunk_size=self.config.chunk_size,
-                chunk_overlap=self.config.chunk_overlap,
-            )
-            chunk_ms = (time.perf_counter() - t0) * 1000
-            if not chunks:
-                errors += 1
-                continue
-            logger.info("[%s] chunk: %.0fms (%d chunks)", file_path.name, chunk_ms, len(chunks))
-
-            chunk_texts = [c.text for c in chunks]
-            pending_files.append(_PendingFile(path=file_path, chunks=chunks, chunk_texts=chunk_texts))
-            pending_chunk_texts.extend(chunk_texts)
-
-            # Flush when batch is full
-            if len(pending_chunk_texts) >= BATCH_EMBED_SIZE:
-                yield IndexStatus(
-                    StatusType.EMBEDDING,
-                    message=f"Embedding {len(pending_chunk_texts)} chunks from {len(pending_files)} files",
-                    current=file_num,
-                    total=len(files_to_index),
-                )
-                completed = _flush_batch()
-                for cpath, nchunks in completed:
-                    yield IndexStatus(
-                        StatusType.COMPLETE,
-                        str(cpath),
-                        f"{nchunks} chunks",
-                        current=indexed,
-                        total=len(files_to_index),
+            def _submit_next() -> None:
+                """Submit the next file from file_iter to the parse pool."""
+                try:
+                    fp = next(file_iter)
+                    fut = executor.submit(
+                        _parse_and_chunk_file,
+                        fp,
+                        self.config.chunk_size,
+                        self.config.chunk_overlap,
                     )
+                    pending_futures.append((fp, fut))
+                except StopIteration:
+                    pass
 
-        # Flush remaining
+            # Pre-fill the lookahead window
+            for _ in range(min(PARSE_LOOKAHEAD, n_total)):
+                _submit_next()
+
+            file_num = 0
+            while pending_futures:
+                file_path, fut = pending_futures.popleft()
+                file_num += 1
+
+                # Keep the window full: submit next file while we wait
+                _submit_next()
+
+                # Yield PARSING status immediately (non-blocking — the future
+                # is likely already running or complete in a background thread)
+                yield IndexStatus(
+                    StatusType.PARSING, str(file_path),
+                    current=file_num, total=n_total,
+                )
+
+                # Block until this file's parse+chunk is done (or times out)
+                try:
+                    pending_file, error = fut.result(timeout=PARSE_TIMEOUT_SEC)
+                except _cf.TimeoutError:
+                    yield IndexStatus(
+                        StatusType.SKIPPED, str(file_path),
+                        f"Skipped: parse+chunk took >{PARSE_TIMEOUT_SEC}s",
+                    )
+                    errors += 1
+                    continue
+                except Exception as exc:  # noqa: BLE001
+                    yield IndexStatus(StatusType.ERROR, str(file_path), str(exc))
+                    errors += 1
+                    continue
+
+                if error or pending_file is None:
+                    if error not in ("parse_failed", "no_chunks"):
+                        yield IndexStatus(StatusType.ERROR, str(file_path), error or "unknown error")
+                    errors += 1
+                    continue
+
+                # Accumulate into cross-file batch
+                pending_files.append(pending_file)
+                pending_chunk_texts.extend(pending_file.chunk_texts)
+
+                # Flush when batch is full.
+                # While _flush_batch() runs embed (ONNX releases GIL),
+                # background threads parse the next PARSE_LOOKAHEAD files.
+                if len(pending_chunk_texts) >= BATCH_EMBED_SIZE:
+                    yield IndexStatus(
+                        StatusType.EMBEDDING,
+                        message=f"Embedding {len(pending_chunk_texts)} chunks from {len(pending_files)} files",
+                        current=file_num,
+                        total=n_total,
+                    )
+                    completed = _flush_batch()
+                    for cpath, nchunks in completed:
+                        yield IndexStatus(
+                            StatusType.COMPLETE,
+                            str(cpath),
+                            f"{nchunks} chunks",
+                            current=indexed,
+                            total=n_total,
+                        )
+
+        # Flush remaining chunks after all files are parsed
         if pending_chunk_texts:
             yield IndexStatus(
                 StatusType.EMBEDDING,
                 message=f"Embedding {len(pending_chunk_texts)} chunks from {len(pending_files)} files",
-                current=len(files_to_index),
-                total=len(files_to_index),
+                current=n_total,
+                total=n_total,
             )
             completed = _flush_batch()
             for cpath, nchunks in completed:
@@ -351,12 +449,14 @@ class IndexingPipeline:
                     str(cpath),
                     f"{nchunks} chunks",
                     current=indexed,
-                    total=len(files_to_index),
+                    total=n_total,
                 )
 
-        # Save combined embeddings to disk
+        # Save combined embeddings to disk as float16 (half the size/RAM of float32).
+        # FAISS and the warm-up loader convert back to float32 on load.
         if all_embeddings:
-            combined = np.vstack(all_embeddings)
+            mem_pre = log_memory("before-embeddings-save")
+            combined = np.vstack(all_embeddings).astype(np.float16)
             np.save(
                 str(self._embeddings_path / "embeddings.npy"),
                 combined,
@@ -365,7 +465,10 @@ class IndexingPipeline:
                 str(self._embeddings_path / "chunk_ids.npy"),
                 np.array(all_chunk_ids, dtype=np.int64),
             )
+            del combined  # release before returning
+            log_memory_delta(mem_pre, "after-embeddings-save")
 
+        log_memory_delta(mem_start, "index-directory-end")
         summary = {
             "indexed": indexed,
             "skipped": len(files) - len(files_to_index),

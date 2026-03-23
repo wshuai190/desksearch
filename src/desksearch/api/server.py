@@ -1,4 +1,5 @@
 """FastAPI application factory for DeskSearch."""
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -11,6 +12,9 @@ from desksearch.core.search import HybridSearchEngine
 from desksearch.indexer.embedder import Embedder
 from desksearch.indexer.pipeline import IndexingPipeline
 from desksearch.indexer.store import MetadataStore
+from desksearch.utils.memory import log_memory, log_memory_delta
+
+logger = logging.getLogger(__name__)
 
 # Look for UI files: first in package (pip install), then in source tree (dev)
 _pkg_ui = Path(__file__).resolve().parent.parent / "ui_dist"
@@ -47,15 +51,20 @@ def create_app(
         config, search_engine=engine, embedder=embedder, store=store,
     )
 
-    # In standalone mode, eagerly load the model so first search is fast.
-    # In daemon mode, the daemon controls model lifecycle (lazy load).
-    if is_standalone:
-        embedder.warmup()
+    # Lazy loading: the embedding model loads on first use (search or index).
+    # Eagerly warming the model here keeps 100-200 MB loaded even when idle,
+    # which conflicts with the <200 MB idle-memory budget.
 
-    # Load existing chunks into the search engine from the store.
-    # Skip in daemon mode — the daemon already warms the engine in _init_pipeline.
+    # Log baseline memory before loading existing index data.
+    mem_before = log_memory("startup-before-warm")
+
+    # Load previously indexed data into the live search engine.
+    # BM25 (tantivy) and FAISS both reload from disk automatically in their
+    # constructors, so this call only needs to do lightweight bookkeeping.
     if is_standalone:
-        _warm_search_engine(engine, store, embedder, config)
+        _warm_search_engine(engine, store, config)
+
+    log_memory_delta(mem_before, "startup-after-warm")
 
     set_components(engine, pipeline, embedder, store)
 
@@ -108,48 +117,24 @@ def create_app(
     return app
 
 
-def _warm_search_engine(engine, store, embedder, config) -> None:
-    """Load previously indexed chunks into the search engine on startup.
+def _warm_search_engine(engine, store, config) -> None:
+    """Log index state on startup — no heavy lifting needed.
 
-    Reads chunk texts from SQLite and their embeddings from the saved .npy
-    files. If the .npy files are missing (first run or cleared), this is a
-    no-op and the engine starts empty.
+    BM25 (tantivy) and FAISS both persist to disk and reload their data
+    automatically in their constructors.  The old implementation re-loaded
+    all embeddings from ``embeddings.npy`` and re-added every chunk to both
+    indexes, which was entirely redundant and wasted 50-200 MB of RAM.
+
+    We now just log counts so operators can confirm the index is healthy.
+    The ``_doc_texts`` LRU cache in the search engine fills on demand as
+    searches run, with BM25 as a fallback for cache misses.
     """
-    import logging
-    import numpy as np
-
-    logger = logging.getLogger(__name__)
-
-    embeddings_dir = config.data_dir / "embeddings"
-    emb_path = embeddings_dir / "embeddings.npy"
-    ids_path = embeddings_dir / "chunk_ids.npy"
-
-    if not emb_path.exists() or not ids_path.exists():
-        return
-
-    try:
-        embeddings = np.load(str(emb_path))
-        chunk_ids = np.load(str(ids_path))
-    except Exception:
-        logger.warning("Failed to load saved embeddings, starting with empty index")
-        return
-
-    # Batch-load chunks to avoid per-document tantivy writer lock churn
-    batch: list[tuple[str, str, np.ndarray]] = []
-    WARM_BATCH_SIZE = 256
-
-    for i, chunk_id in enumerate(chunk_ids):
-        chunk = store.get_chunk_by_id(int(chunk_id))
-        if chunk is None:
-            continue
-        batch.append((str(int(chunk_id)), chunk.text, embeddings[i]))
-
-        if len(batch) >= WARM_BATCH_SIZE:
-            engine.add_documents(batch)
-            batch.clear()
-
-    if batch:
-        engine.add_documents(batch)
-
-    if len(chunk_ids):
-        logger.info("Loaded %d chunks into search engine", len(chunk_ids))
+    doc_count = store.document_count()
+    chunk_count = store.chunk_count()
+    bm25_docs = engine.bm25.doc_count
+    faiss_vecs = engine.dense.doc_count
+    logger.info(
+        "Index ready: %d documents, %d chunks in SQLite | "
+        "%d docs in BM25 | %d vectors in FAISS",
+        doc_count, chunk_count, bm25_docs, faiss_vecs,
+    )

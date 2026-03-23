@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 
 
@@ -42,15 +43,15 @@ def reciprocal_rank_fusion(
         raise ValueError(f"Expected {n_systems} weights, got {len(weights)}")
 
     # Track per-system ranks for diagnostics
-    doc_scores: dict[str, float] = {}
+    doc_scores: defaultdict[str, float] = defaultdict(float)
     doc_bm25_rank: dict[str, int] = {}
     doc_dense_rank: dict[str, int] = {}
 
     for system_idx, results in enumerate(result_lists):
         rank_store = doc_bm25_rank if system_idx == 0 else doc_dense_rank
+        w = weights[system_idx]
         for rank, (doc_id, _original_score) in enumerate(results, start=1):
-            rrf_contribution = weights[system_idx] / (k + rank)
-            doc_scores[doc_id] = doc_scores.get(doc_id, 0.0) + rrf_contribution
+            doc_scores[doc_id] += w / (k + rank)
             rank_store[doc_id] = rank
 
     fused = [

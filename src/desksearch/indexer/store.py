@@ -54,7 +54,16 @@ class MetadataStore:
                 str(self.db_path), check_same_thread=False,
             )
             self._conn.row_factory = sqlite3.Row
+            # WAL mode: concurrent readers don't block writers
             self._conn.execute("PRAGMA journal_mode=WAL")
+            # NORMAL sync: safe after WAL, much faster than FULL
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            # 64 MB page cache (negative = KB)
+            self._conn.execute("PRAGMA cache_size=-65536")
+            # Keep temp tables in memory rather than creating temp files
+            self._conn.execute("PRAGMA temp_store=MEMORY")
+            # Allow OS to mmap up to 256 MB of the DB for read-ahead
+            self._conn.execute("PRAGMA mmap_size=268435456")
             self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
 
@@ -162,17 +171,21 @@ class MetadataStore:
             chunks: List of (text, chunk_index, char_offset) tuples.
 
         Returns:
-            List of chunk IDs.
+            List of chunk IDs (contiguous, in insertion order).
         """
-        chunk_ids = []
-        for text, chunk_index, char_offset in chunks:
-            cursor = self.conn.execute(
-                "INSERT INTO chunks (doc_id, text, chunk_index, char_offset) VALUES (?, ?, ?, ?)",
-                (doc_id, text, chunk_index, char_offset),
-            )
-            chunk_ids.append(cursor.lastrowid)
+        if not chunks:
+            return []
+        cursor = self.conn.cursor()
+        cursor.executemany(
+            "INSERT INTO chunks (doc_id, text, chunk_index, char_offset) VALUES (?, ?, ?, ?)",
+            [(doc_id, text, chunk_index, char_offset) for text, chunk_index, char_offset in chunks],
+        )
         self.conn.commit()
-        return chunk_ids
+        # cursor.lastrowid is None after executemany in Python 3.12+ (PEP 249 compliance).
+        # Use last_insert_rowid() instead — it's always accurate after a commit.
+        last_id: int = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        first_id = last_id - len(chunks) + 1
+        return list(range(first_id, last_id + 1))
 
     def get_chunks(self, doc_id: int) -> list[ChunkRecord]:
         """Get all chunks for a document, ordered by chunk_index."""
@@ -216,6 +229,21 @@ class MetadataStore:
         """Return total number of stored chunks."""
         row = self.conn.execute("SELECT COUNT(*) as cnt FROM chunks").fetchone()
         return row["cnt"]
+
+    def get_chunks_by_ids(self, chunk_ids: list[int]) -> dict[int, "ChunkRecord"]:
+        """Batch-fetch chunks by a list of IDs.
+
+        Returns a dict mapping chunk_id → ChunkRecord.  Missing IDs are omitted.
+        More efficient than N individual ``get_chunk_by_id`` calls.
+        """
+        if not chunk_ids:
+            return {}
+        placeholders = ",".join("?" * len(chunk_ids))
+        rows = self.conn.execute(
+            f"SELECT * FROM chunks WHERE id IN ({placeholders})",
+            chunk_ids,
+        ).fetchall()
+        return {row["id"]: ChunkRecord(**dict(row)) for row in rows}
 
     def close(self) -> None:
         """Close the database connection."""

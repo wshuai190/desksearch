@@ -9,6 +9,7 @@ import gc
 import logging
 import threading
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
@@ -51,6 +52,10 @@ class Embedder:
     The model is loaded lazily, cached, and auto-unloaded after idle.
     """
 
+    # Maximum number of single-query embeddings to cache.
+    # Memory cost: _QUERY_CACHE_SIZE * 384 * 4 bytes ≈ 512 * 384 * 4 ≈ 768 KB
+    _QUERY_CACHE_SIZE = 512
+
     def __init__(
         self,
         model_name: str = DEFAULT_EMBEDDING_MODEL,
@@ -67,6 +72,11 @@ class Embedder:
         self._last_used: float = 0.0
         self._unload_timer: Optional[threading.Timer] = None
         self._dimension: Optional[int] = None
+
+        # LRU cache for single-query embeddings.  Keyed on the raw query string.
+        # Thread-safe because reads/writes are protected by _query_cache_lock.
+        self._query_cache: OrderedDict[str, np.ndarray] = OrderedDict()
+        self._query_cache_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Model lifecycle
@@ -133,10 +143,17 @@ class Embedder:
         model_path = self._get_onnx_model_path()
 
         # Configure ONNX Runtime for low memory
+        # Use more CPU threads on multi-core machines for better GEMM throughput.
+        # Leave 2-3 cores free for parallel parse workers and OS overhead.
+        import os as _os
+        _ncpus = _os.cpu_count() or 4
+        _intra = min(_ncpus, 6)   # up to 6 threads inside a single op (GEMM, etc.)
+        _inter = min(max(_ncpus // 4, 1), 2)  # up to 2 for independent ops
+
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_options.intra_op_num_threads = 2
-        sess_options.inter_op_num_threads = 1
+        sess_options.intra_op_num_threads = _intra
+        sess_options.inter_op_num_threads = _inter
 
         self._onnx_session = ort.InferenceSession(
             str(model_path),
@@ -213,6 +230,12 @@ class Embedder:
 
             logger.info("Embedding model unloaded (%s backend), memory freed", self._backend)
 
+        # Clear the query cache — embeddings from the old session are still
+        # valid (same model), but clearing avoids memory accumulation when the
+        # model cycles through idle/active phases.
+        with self._query_cache_lock:
+            self._query_cache.clear()
+
     # ------------------------------------------------------------------
     # Embedding
     # ------------------------------------------------------------------
@@ -279,7 +302,7 @@ class Embedder:
         )
         return embeddings.astype(np.float32)
 
-    def embed(self, texts: list[str], batch_size: int = 64) -> np.ndarray:
+    def embed(self, texts: list[str], batch_size: int = 128) -> np.ndarray:
         """Embed a list of text strings.
 
         Args:
@@ -300,9 +323,28 @@ class Embedder:
             return self._embed_sentence_transformers(texts, batch_size)
 
     def embed_query(self, query: str) -> np.ndarray:
-        """Embed a single query string.
+        """Embed a single query string, with LRU caching for repeated queries.
+
+        Repeated identical queries (e.g. paginated searches, retries) return
+        the cached embedding directly — no ONNX inference needed.
 
         Returns:
             1D numpy array of shape (dimension,).
         """
-        return self.embed([query])[0]
+        # Fast path: return cached embedding if available.
+        with self._query_cache_lock:
+            if query in self._query_cache:
+                self._query_cache.move_to_end(query)
+                return self._query_cache[query].copy()
+
+        # Slow path: compute embedding, then cache it.
+        result = self.embed([query])[0]
+
+        with self._query_cache_lock:
+            self._query_cache[query] = result
+            self._query_cache.move_to_end(query)
+            # Evict oldest entry if over capacity.
+            while len(self._query_cache) > self._QUERY_CACHE_SIZE:
+                self._query_cache.popitem(last=False)
+
+        return result.copy()
