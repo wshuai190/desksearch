@@ -277,11 +277,18 @@ class IndexingPipeline:
         for i, file_path in enumerate(files_to_index):
             file_num = i + 1
 
-            # Parse
+            # Parse (with timeout for large files)
             yield IndexStatus(StatusType.PARSING, str(file_path), current=file_num, total=len(files_to_index))
             t0 = time.perf_counter()
             try:
-                text = parse_file(file_path)
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(parse_file, file_path)
+                    text = future.result(timeout=30)  # 30s max per file
+            except concurrent.futures.TimeoutError:
+                yield IndexStatus(StatusType.SKIPPED, str(file_path), "Skipped: parsing took >30s")
+                errors += 1
+                continue
             except Exception as e:
                 yield IndexStatus(StatusType.ERROR, str(file_path), str(e))
                 errors += 1
@@ -291,7 +298,7 @@ class IndexingPipeline:
                 errors += 1
                 continue
             parse_ms = (time.perf_counter() - t0) * 1000
-            logger.info("[%s] parse: %.0fms", file_path.name, parse_ms)
+            logger.info("[%s] parse: %.0fms (%d chars)", file_path.name, parse_ms, len(text))
 
             # Chunk
             t0 = time.perf_counter()

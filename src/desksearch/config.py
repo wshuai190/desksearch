@@ -31,15 +31,25 @@ class Config(BaseModel):
     port: int = Field(default=DEFAULT_PORT, description="API server port")
     file_extensions: list[str] = Field(
         default_factory=lambda: [
-            ".txt", ".md", ".pdf", ".docx", ".doc",
+            # Documents
+            ".txt", ".md", ".pdf", ".docx", ".doc", ".pptx", ".ppt",
+            ".xlsx", ".xls", ".epub", ".rtf",
+            # Code
             ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h", ".go", ".rs",
+            ".rb", ".swift", ".kt", ".scala", ".lua", ".pl", ".php",
+            # Web / data
             ".html", ".htm", ".xml", ".json", ".yaml", ".yml", ".toml",
             ".csv", ".tsv",
-            ".tex", ".rst", ".org",
-            ".sh", ".bash", ".zsh",
-            ".sql",
+            # Academic / writing
+            ".tex", ".rst", ".org", ".ipynb",
+            # Shell / config
+            ".sh", ".bash", ".zsh", ".sql",
+            ".log", ".cfg", ".ini", ".conf", ".env",
             ".r", ".R",
-            ".ipynb",
+            # Email
+            ".eml", ".msg",
+            # Archives (text files inside are extracted)
+            ".zip", ".tar", ".gz", ".tgz", ".bz2", ".xz",
         ],
         description="File extensions to index",
     )
