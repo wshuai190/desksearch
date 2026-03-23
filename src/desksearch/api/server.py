@@ -82,6 +82,25 @@ def create_app(
     app.include_router(router)
     app.include_router(ws_router)
 
+    # Auto-index on startup if folders are configured but nothing is indexed
+    @app.on_event("startup")
+    async def _auto_index_if_empty():
+        import asyncio
+        if store and store.document_count() == 0 and config.index_paths:
+            import logging
+            logger = logging.getLogger("desksearch")
+            logger.info("No indexed files found. Auto-indexing configured folders...")
+            # Trigger indexing via the API endpoint internally
+            from desksearch.api.schemas import IndexRequest
+            req = IndexRequest(paths=[str(p) for p in config.index_paths])
+            try:
+                await trigger_index(req)
+            except Exception as e:
+                logger.warning(f"Auto-index failed: {e}")
+
+    # Import trigger_index for auto-index
+    from desksearch.api.routes import trigger_index
+
     # Serve built React UI if available
     if UI_DIST_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(UI_DIST_DIR), html=True), name="ui")
