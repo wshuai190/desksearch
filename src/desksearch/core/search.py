@@ -269,7 +269,7 @@ class HybridSearchEngine:
         *,
         alpha: float = 0.4,
         rrf_k: int = 60,
-        dimension: int = 384,
+        dimension: int = 64,
         cache_size: int = 256,
     ) -> None:
         """Initialize the hybrid search engine.

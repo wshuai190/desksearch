@@ -285,7 +285,7 @@ class TestPipeline:
         import numpy as np
 
         mock_embedder = MockEmbedder.return_value
-        mock_embedder.embed.return_value = np.random.rand(1, 384).astype(np.float32)
+        mock_embedder.embed.return_value = np.random.rand(1, 64).astype(np.float32)
 
         config = Config(data_dir=tmp_path / "data")
         pipeline = IndexingPipeline(config)
@@ -315,7 +315,7 @@ class TestPipeline:
         import numpy as np
 
         mock_embedder = MockEmbedder.return_value
-        mock_embedder.embed.return_value = np.random.rand(1, 384).astype(np.float32)
+        mock_embedder.embed.return_value = np.random.rand(1, 64).astype(np.float32)
 
         config = Config(data_dir=tmp_path / "data")
         pipeline = IndexingPipeline(config)

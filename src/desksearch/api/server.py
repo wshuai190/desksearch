@@ -64,8 +64,13 @@ def create_app(
 
     # Initialize core components — single instances shared across the app
     store = store or MetadataStore(config.data_dir / "metadata.db")
-    embedder = embedder or Embedder(config.embedding_model)
-    engine = engine or HybridSearchEngine(config)
+    embedder = embedder or Embedder(
+        config.embedding_model,
+        embedding_dim=config.embedding_dim,
+    )
+    engine = engine or HybridSearchEngine(
+        config, dimension=config.embedding_dim,
+    )
     pipeline = pipeline or IndexingPipeline(
         config, search_engine=engine, embedder=embedder, store=store,
     )

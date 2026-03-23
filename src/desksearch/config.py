@@ -27,6 +27,11 @@ class Config(BaseModel):
     embedding_model: str = Field(default=DEFAULT_EMBEDDING_MODEL, description="Sentence-transformer model name")
     chunk_size: int = Field(default=DEFAULT_CHUNK_SIZE, description="Characters per chunk")
     chunk_overlap: int = Field(default=DEFAULT_CHUNK_OVERLAP, description="Overlap between chunks")
+    embedding_dim: int = Field(
+        default=64,
+        description="Embedding dimensions to use (Matryoshka truncation). "
+                    "Lower = faster search + smaller index. Options: 32/64/128/256/384",
+    )
     host: str = Field(default=DEFAULT_HOST, description="API server host")
     port: int = Field(default=DEFAULT_PORT, description="API server port")
     file_extensions: list[str] = Field(

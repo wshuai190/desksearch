@@ -236,7 +236,7 @@ class TestIncrementalIndexing:
     @patch("desksearch.indexer.pipeline.Embedder")
     def test_incremental_index_finds_new_file(self, MockEmbedder, tmp_path: Path):
         mock_embedder = MockEmbedder.return_value
-        mock_embedder.embed.return_value = np.random.rand(1, 384).astype(np.float32)
+        mock_embedder.embed.return_value = np.random.rand(1, 64).astype(np.float32)
 
         config = Config(
             data_dir=tmp_path / "data",
@@ -262,7 +262,7 @@ class TestIncrementalIndexing:
 
         # Add a new file
         (docs_dir / "file2.txt").write_text("New document about networking")
-        mock_embedder.embed.return_value = np.random.rand(1, 384).astype(np.float32)
+        mock_embedder.embed.return_value = np.random.rand(1, 64).astype(np.float32)
 
         # Re-index — should pick up file2 and skip file1
         statuses2 = list(pipeline.index_directory(docs_dir))
@@ -282,7 +282,7 @@ class TestIncrementalIndexing:
         import time
 
         mock_embedder = MockEmbedder.return_value
-        mock_embedder.embed.return_value = np.random.rand(1, 384).astype(np.float32)
+        mock_embedder.embed.return_value = np.random.rand(1, 64).astype(np.float32)
 
         config = Config(
             data_dir=tmp_path / "data",
@@ -312,7 +312,7 @@ class TestIncrementalIndexing:
         assert pipeline.store.needs_indexing(f.resolve()) is True
 
         # Re-index
-        mock_embedder.embed.return_value = np.random.rand(1, 384).astype(np.float32)
+        mock_embedder.embed.return_value = np.random.rand(1, 64).astype(np.float32)
         list(pipeline.index_directory(docs_dir))
 
         doc2 = pipeline.store.get_document(f.resolve())
@@ -322,7 +322,7 @@ class TestIncrementalIndexing:
     @patch("desksearch.indexer.pipeline.Embedder")
     def test_deleted_file_removed_from_index(self, MockEmbedder, tmp_path: Path):
         mock_embedder = MockEmbedder.return_value
-        mock_embedder.embed.return_value = np.random.rand(1, 384).astype(np.float32)
+        mock_embedder.embed.return_value = np.random.rand(1, 64).astype(np.float32)
 
         config = Config(
             data_dir=tmp_path / "data",

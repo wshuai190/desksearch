@@ -72,9 +72,11 @@ class Embedder:
         self,
         model_name: str = DEFAULT_EMBEDDING_MODEL,
         idle_timeout: float = _DEFAULT_IDLE_TIMEOUT,
+        embedding_dim: int = 64,
     ) -> None:
         self.model_name = model_name
         self.idle_timeout = idle_timeout
+        self._target_dim = embedding_dim  # Matryoshka truncation target
 
         self._model = None          # SentenceTransformer or None
         self._onnx_session = None   # onnxruntime.InferenceSession or None
@@ -312,11 +314,25 @@ class Embedder:
 
     @property
     def dimension(self) -> int:
-        """Return the embedding dimension of the model."""
+        """Return the effective embedding dimension (after Matryoshka truncation)."""
         if self._dimension is not None:
-            return self._dimension
+            return min(self._target_dim, self._dimension)
         self._ensure_loaded()
-        return self._dimension
+        return min(self._target_dim, self._dimension)
+
+    def _truncate_and_normalize(self, embeddings: np.ndarray) -> np.ndarray:
+        """Truncate to target dimension and re-normalize (Matryoshka).
+
+        When target_dim < model dimension, keeps only the first N dimensions
+        then L2-normalizes. This preserves ranking quality per the Matryoshka
+        representation learning principle.
+        """
+        if self._target_dim >= embeddings.shape[1]:
+            return embeddings
+        truncated = embeddings[:, :self._target_dim]
+        norms = np.linalg.norm(truncated, axis=1, keepdims=True)
+        norms = np.clip(norms, a_min=1e-9, a_max=None)
+        return (truncated / norms).astype(np.float32)
 
     def _mean_pool_and_normalize(
         self, token_embeddings: np.ndarray, attention_mask: np.ndarray
@@ -375,6 +391,8 @@ class Embedder:
     def embed(self, texts: list[str], batch_size: int = 128) -> np.ndarray:
         """Embed a list of text strings.
 
+        Applies Matryoshka dimension truncation when target_dim < model dim.
+
         Args:
             texts: List of text strings to embed.
             batch_size: Number of texts to embed at once.
@@ -388,9 +406,11 @@ class Embedder:
         self._ensure_loaded()
 
         if self._backend == "onnx":
-            return self._embed_onnx(texts, batch_size)
+            full = self._embed_onnx(texts, batch_size)
         else:
-            return self._embed_sentence_transformers(texts, batch_size)
+            full = self._embed_sentence_transformers(texts, batch_size)
+
+        return self._truncate_and_normalize(full)
 
     def embed_with_cache(
         self,
