@@ -160,7 +160,12 @@ export default function FolderManager() {
           setIndexProgress(null);
           loadFolders(); // refresh counts
         } else {
-          setIndexProgress(data);
+          // Don't reset progress bar if we get 0/0 during discovery phase
+          if (data.current === 0 && data.total === 0 && data.status === 'discovery') {
+            setIndexProgress(prev => prev ? { ...prev, message: data.message || 'Scanning...' } : data);
+          } else {
+            setIndexProgress(data);
+          }
         }
       };
       ws.onclose = () => {

@@ -316,6 +316,8 @@ class IndexingPipeline:
                 yield IndexStatus(
                     StatusType.EMBEDDING,
                     message=f"Embedding {len(pending_chunk_texts)} chunks from {len(pending_files)} files",
+                    current=file_num,
+                    total=len(files_to_index),
                 )
                 completed = _flush_batch()
                 for cpath, nchunks in completed:
@@ -332,6 +334,8 @@ class IndexingPipeline:
             yield IndexStatus(
                 StatusType.EMBEDDING,
                 message=f"Embedding {len(pending_chunk_texts)} chunks from {len(pending_files)} files",
+                current=len(files_to_index),
+                total=len(files_to_index),
             )
             completed = _flush_batch()
             for cpath, nchunks in completed:

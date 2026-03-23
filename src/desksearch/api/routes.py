@@ -209,12 +209,17 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
                     if status is None:
                         break
                     folder_last_current = status.current or 0
+                    current = status.current or 0
+                    total = status.total or 0
+                    # Use cumulative totals, but don't send 0/0 to frontend
+                    broadcast_current = cumulative_done + current
+                    broadcast_total = cumulative_total if cumulative_total > 0 else total
                     await _broadcast_progress({
                         "status": status.status.value,
                         "file": status.file,
                         "message": status.message,
-                        "current": cumulative_done + folder_last_current,
-                        "total": cumulative_total,
+                        "current": broadcast_current,
+                        "total": broadcast_total,
                     })
 
                 await task
