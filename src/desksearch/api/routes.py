@@ -157,7 +157,23 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
     async def _run_index() -> None:
         global _indexing
         try:
+            import queue
             loop = asyncio.get_event_loop()
+            cumulative_done = 0
+            cumulative_total = 0
+
+            # First pass: count total files across all folders for accurate progress
+            for p in request.paths:
+                path = Path(p).expanduser().resolve()
+                if path.is_dir():
+                    try:
+                        count = sum(1 for _ in path.rglob("*") if _.is_file())
+                        cumulative_total += count
+                    except Exception:
+                        cumulative_total += 100  # estimate
+                else:
+                    cumulative_total += 1
+
             for p in request.paths:
                 path = Path(p).expanduser().resolve()
                 if path.is_dir():
@@ -165,8 +181,8 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
                 else:
                     gen = _pipeline.index_file(path)
 
-                import queue
                 progress_queue: queue.Queue = queue.Queue()
+                folder_last_current = 0
 
                 def _drain_generator(g, q):
                     """Drain a generator, pushing status to queue."""
@@ -192,15 +208,17 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
                         continue
                     if status is None:
                         break
+                    folder_last_current = status.current or 0
                     await _broadcast_progress({
                         "status": status.status.value,
                         "file": status.file,
                         "message": status.message,
-                        "current": status.current,
-                        "total": status.total,
+                        "current": cumulative_done + folder_last_current,
+                        "total": cumulative_total,
                     })
 
                 await task
+                cumulative_done += folder_last_current
         except Exception:
             logger.exception("Indexing failed")
         finally:
