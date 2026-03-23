@@ -6,6 +6,7 @@ export interface SearchResult {
   score: number;
   file_type: string;
   modified: string | null;
+  file_size?: number;
 }
 
 export interface SearchResponse {

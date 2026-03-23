@@ -228,17 +228,73 @@ export default function FolderManager() {
     }
   };
 
+  const clearFolderIndex = async (path: string) => {
+    if (!confirm(`Clear all indexed data for this folder?\n\n${path}\n\nThe folder will remain in your watch list but its index will be rebuilt on next indexing.`)) return;
+    setActionLoading(`clear-${path}`);
+    try {
+      await fetch(`${API_BASE_URL}/api/index/folder/${encodeURIComponent(path)}`, { method: 'DELETE' });
+      await loadFolders();
+    } catch {
+      // ignore
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const clearAllIndex = async () => {
+    if (!confirm('Clear the ENTIRE search index?\n\nAll indexed data will be removed. Your folder list will be kept. You can re-index afterwards.')) return;
+    setActionLoading('clear-all');
+    try {
+      await fetch(`${API_BASE_URL}/api/index/clear`, { method: 'DELETE' });
+      await loadFolders();
+    } catch {
+      // ignore
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="text-gray-400">Loading folders...</div>
+      <div className="max-w-3xl mx-auto px-4 py-6 space-y-4">
+        <div className="h-6 bg-gray-200 dark:bg-dark-border rounded w-40 animate-pulse" />
+        <div className="flex gap-2">
+          <div className="flex-1 h-9 bg-gray-200 dark:bg-dark-border rounded-lg animate-pulse" />
+          <div className="w-24 h-9 bg-gray-200 dark:bg-dark-border rounded-lg animate-pulse" />
+          <div className="w-16 h-9 bg-gray-200 dark:bg-dark-border rounded-lg animate-pulse" />
+        </div>
+        {[1, 2, 3].map(i => (
+          <div key={i} className="bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-lg p-4 animate-pulse">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1 space-y-2">
+                <div className="h-4 bg-gray-200 dark:bg-dark-border rounded w-3/4" />
+                <div className="h-3 bg-gray-200 dark:bg-dark-border rounded w-1/2" />
+              </div>
+              <div className="flex gap-2">
+                <div className="w-20 h-7 bg-gray-200 dark:bg-dark-border rounded-lg" />
+                <div className="w-16 h-7 bg-gray-200 dark:bg-dark-border rounded-lg" />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
-      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Watched Folders</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Watched Folders</h2>
+        {folders.length > 0 && (
+          <button
+            onClick={clearAllIndex}
+            disabled={actionLoading === 'clear-all'}
+            className="px-3 py-1.5 text-xs rounded-lg border border-red-200 dark:border-red-900/50 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
+          >
+            {actionLoading === 'clear-all' ? 'Clearing...' : '🗑️ Clear All Index'}
+          </button>
+        )}
+      </div>
 
       {/* Add folder */}
       <div className="flex gap-2">
@@ -310,8 +366,17 @@ export default function FolderManager() {
 
       {/* Folder list */}
       {folders.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">
-          No watched folders. Add a folder path above or use Browse to start indexing.
+        <div className="flex flex-col items-center justify-center py-16 text-center animate-fadeIn">
+          <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-dark-border flex items-center justify-center mb-4">
+            <svg className="w-8 h-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            </svg>
+          </div>
+          <h3 className="text-base font-medium text-gray-700 dark:text-gray-300 mb-1">No folders yet</h3>
+          <p className="text-sm text-gray-400 dark:text-gray-500 max-w-xs">
+            Add a folder path above or click <strong>Browse</strong> to pick one.
+            Files inside will be indexed for search.
+          </p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -347,10 +412,18 @@ export default function FolderManager() {
                     {actionLoading === `reindex-${folder.path}` ? 'Reindexing...' : 'Reindex'}
                   </button>
                   <button
+                    onClick={() => clearFolderIndex(folder.path)}
+                    disabled={actionLoading === `clear-${folder.path}`}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-amber-200 dark:border-amber-900/50 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50 transition-colors"
+                    title="Clear indexed data for this folder"
+                  >
+                    {actionLoading === `clear-${folder.path}` ? 'Clearing...' : 'Clear Index'}
+                  </button>
+                  <button
                     onClick={() => removeFolder(folder.path)}
                     disabled={actionLoading === folder.path}
                     className="px-3 py-1.5 text-xs rounded-lg border border-red-200 dark:border-red-900/50 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50 transition-colors"
-                    title="Remove folder"
+                    title="Remove folder and its index"
                   >
                     {actionLoading === folder.path ? 'Removing...' : 'Remove'}
                   </button>

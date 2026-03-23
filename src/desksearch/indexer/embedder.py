@@ -93,13 +93,38 @@ class Embedder:
         return self._backend
 
     def _get_onnx_model_path(self) -> Path:
-        """Download/cache the ONNX model and return its path."""
-        from huggingface_hub import hf_hub_download
+        """Download/cache the ONNX model and return its path.
 
-        model_path = hf_hub_download(
-            repo_id=_ONNX_MODEL_REPO,
-            filename=_ONNX_MODEL_FILE,
-        )
+        Raises a user-friendly RuntimeError when the download fails so the
+        operator gets actionable guidance rather than a cryptic traceback.
+        """
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError as exc:
+            raise RuntimeError(
+                "huggingface_hub is required to download the ONNX model. "
+                "Install it with: pip install huggingface-hub"
+            ) from exc
+
+        try:
+            model_path = hf_hub_download(
+                repo_id=_ONNX_MODEL_REPO,
+                filename=_ONNX_MODEL_FILE,
+            )
+        except Exception as exc:
+            # Provide concrete, actionable error guidance.
+            hint = (
+                f"Failed to download ONNX model '{_ONNX_MODEL_REPO}/{_ONNX_MODEL_FILE}'.\n"
+                "Possible causes and fixes:\n"
+                "  1. No internet connection — connect and retry, or pre-cache the model.\n"
+                "  2. HuggingFace rate-limit — wait a moment and retry.\n"
+                "  3. Offline environment — set HF_HUB_OFFLINE=1 and ensure the model\n"
+                f"     is cached in ~/.cache/huggingface/hub/ (run once online first).\n"
+                "  4. Proxy/firewall — set HTTPS_PROXY or HF_ENDPOINT env vars.\n"
+                f"Original error: {exc}"
+            )
+            raise RuntimeError(hint) from exc
+
         return Path(model_path)
 
     def _ensure_loaded(self):

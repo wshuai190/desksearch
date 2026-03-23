@@ -80,8 +80,14 @@ export default function Settings() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="text-gray-400">Loading settings...</div>
+      <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+        <div className="h-6 bg-gray-200 dark:bg-dark-border rounded w-32 animate-pulse" />
+        {[1, 2, 3, 4, 5].map(i => (
+          <div key={i} className="space-y-2 animate-pulse">
+            <div className="h-3 bg-gray-200 dark:bg-dark-border rounded w-24" />
+            <div className="h-9 bg-gray-200 dark:bg-dark-border rounded-lg" />
+          </div>
+        ))}
       </div>
     );
   }

@@ -1,7 +1,9 @@
 """FastAPI route definitions for DeskSearch."""
 import asyncio
 import logging
+import math
 import platform
+import re
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -41,6 +43,33 @@ _search_engine = None  # HybridSearchEngine
 _pipeline = None  # IndexingPipeline
 _embedder = None  # Embedder
 _store = None  # MetadataStore
+
+
+def _warm_from_store() -> None:
+    """Reload search engine from store after index changes."""
+    if _store is None or _engine is None:
+        return
+    import numpy as np
+    emb_path = _config.data_dir / "embeddings"
+    emb_file = emb_path / "embeddings.npy"
+    ids_file = emb_path / "chunk_ids.npy"
+    if emb_file.exists() and ids_file.exists():
+        embeddings = np.load(str(emb_file)).astype(np.float32)
+        chunk_ids = np.load(str(ids_file))
+        # Get texts from store
+        all_docs = _store.all_documents()
+        for doc in all_docs:
+            chunks = _store.get_chunks_for_document(doc.id)
+            for chunk in chunks:
+                text = chunk.text
+                cid = str(chunk.id)
+                idx = None
+                for i, stored_id in enumerate(chunk_ids):
+                    if stored_id == chunk.id:
+                        idx = i
+                        break
+                if idx is not None and idx < len(embeddings):
+                    _engine.add_documents([(cid, text, embeddings[idx])])
 
 
 def set_config(config: Config) -> None:
@@ -85,31 +114,85 @@ async def search(
     loop = asyncio.get_event_loop()
     query_embedding = await loop.run_in_executor(None, _embedder.embed_query, q)
 
-    # Run hybrid search
-    raw_results = await _search_engine.search(q, query_embedding, top_k=limit * 2)
+    # Fetch extra candidates to compensate for deduplication and filtering.
+    candidate_count = limit * 4
+    raw_results = await _search_engine.search(q, query_embedding, top_k=candidate_count)
 
-    # Build API results, resolving chunk IDs back to file metadata
-    results: list[SearchResult] = []
+    # --- Pre-pass: resolve chunk → file metadata for all candidates ---
+    chunk_meta: dict[str, tuple] = {}
     for r in raw_results:
         try:
             chunk_id = int(r.doc_id)
         except (ValueError, TypeError):
             continue
-
         chunk = _store.get_chunk_by_id(chunk_id)
         if chunk is None:
             continue
-
         doc = _store.get_document_by_id(chunk.doc_id)
         if doc is None:
             continue
+        chunk_meta[r.doc_id] = (chunk, doc)
 
+    # --- Compute per-chunk boosts (filename match + recency) ---
+    query_tokens = set(re.findall(r"\w+", q.lower()))
+    now = time.time()
+    boosts: dict[str, float] = {}
+
+    for doc_id, (chunk, doc) in chunk_meta.items():
+        multiplier = 1.0
+
+        # Filename boost: reward hits where query terms appear in the filename
+        fname_tokens = set(re.findall(r"\w+", doc.filename.lower()))
+        overlap = query_tokens & fname_tokens
+        if overlap:
+            multiplier *= 1.0 + 0.2 * min(len(overlap), 3)
+
+        # Recency boost: small log-decay; ~+8% for files modified today,
+        # < 1% after 90 days. Keeps recent files visible without dominating.
+        age_days = max(0.0, (now - doc.modified_time) / 86400.0)
+        multiplier *= 1.0 + 0.08 * math.exp(-age_days / 30.0)
+
+        if multiplier != 1.0:
+            boosts[doc_id] = multiplier
+
+    # Re-search with boosts applied (skips the result cache intentionally)
+    if boosts:
+        raw_results = await _search_engine.search(
+            q, query_embedding, top_k=candidate_count, boosts=boosts
+        )
+
+    # --- Deduplication: keep best-scoring chunk per source file ---
+    best_per_file: dict[int, tuple] = {}   # file_doc_id → (raw_result, chunk, doc)
+    extra_counts: dict[int, int] = {}
+
+    for r in raw_results:
+        if r.doc_id not in chunk_meta:
+            continue
+        chunk, doc = chunk_meta[r.doc_id]
+        file_doc_id = doc.id
+
+        if file_doc_id not in best_per_file:
+            best_per_file[file_doc_id] = (r, chunk, doc)
+            extra_counts[file_doc_id] = 0
+        else:
+            extra_counts[file_doc_id] += 1
+
+    # Re-sort by boosted score (dict ordering not guaranteed to be stable)
+    ranked = sorted(
+        best_per_file.values(),
+        key=lambda t: t[0].score,
+        reverse=True,
+    )
+
+    # --- Build final API results ---
+    results: list[SearchResult] = []
+    for r, chunk, doc in ranked:
         file_type = doc.extension.lstrip(".")
         if type and file_type != type:
             continue
 
-        snippet = r.snippets[0].text if r.snippets else chunk.text[:200]
-
+        # Use the highlighted snippet for richer display; fall back to raw text
+        snippet = r.snippets[0].highlighted if r.snippets else chunk.text[:200]
         modified = datetime.fromtimestamp(doc.modified_time, tz=timezone.utc)
 
         results.append(SearchResult(
@@ -120,17 +203,124 @@ async def search(
             score=round(r.score, 4),
             file_type=file_type,
             modified=modified,
+            file_size=doc.size,
+            other_chunk_count=extra_counts.get(doc.id, 0),
         ))
 
         if len(results) >= limit:
             break
 
     elapsed_ms = (time.perf_counter() - start) * 1000
+
+    _SLOW_SEARCH_MS = 100
+    if elapsed_ms > _SLOW_SEARCH_MS:
+        logger.warning(
+            "Slow search (%.0fms) for query %r — %d results",
+            elapsed_ms, q, len(results),
+        )
+
     return SearchResponse(
         results=results,
         total=len(results),
         query_time_ms=round(elapsed_ms, 2),
     )
+
+
+# ---------------------------------------------------------------------------
+# Health check
+# ---------------------------------------------------------------------------
+
+
+@router.get("/health")
+async def health() -> dict:
+    """Check the health of all system components.
+
+    Returns a dict with ``status`` ('healthy' | 'degraded' | 'unhealthy')
+    and per-component details.  This endpoint never raises — it always
+    returns 200 so monitoring systems can read the body for details.
+    """
+    components: dict[str, dict] = {}
+    overall_ok = True
+    degraded = False
+
+    # SQLite
+    try:
+        if _store is not None and _store.ping():
+            components["sqlite"] = {
+                "status": "ok",
+                "doc_count": _store.document_count(),
+                "chunk_count": _store.chunk_count(),
+            }
+        else:
+            components["sqlite"] = {"status": "unavailable"}
+            overall_ok = False
+    except Exception as exc:
+        components["sqlite"] = {"status": "error", "error": str(exc)}
+        overall_ok = False
+
+    # BM25 (tantivy)
+    try:
+        if _search_engine is not None and _search_engine.bm25.available:
+            components["bm25"] = {
+                "status": "ok",
+                "doc_count": _search_engine.bm25.doc_count,
+            }
+        else:
+            components["bm25"] = {"status": "unavailable"}
+            degraded = True
+    except Exception as exc:
+        components["bm25"] = {"status": "error", "error": str(exc)}
+        degraded = True
+
+    # FAISS (dense)
+    try:
+        if _search_engine is not None and _search_engine.dense.available:
+            components["faiss"] = {
+                "status": "ok",
+                "vector_count": _search_engine.dense.doc_count,
+                "index_type": _search_engine.dense.index_type,
+            }
+        else:
+            components["faiss"] = {"status": "unavailable"}
+            degraded = True
+    except Exception as exc:
+        components["faiss"] = {"status": "error", "error": str(exc)}
+        degraded = True
+
+    # Embedder
+    try:
+        if _embedder is not None:
+            components["embedder"] = {
+                "status": "ok",
+                "loaded": _embedder.is_loaded,
+                "backend": _embedder.backend,
+                "model": _embedder.model_name,
+            }
+        else:
+            components["embedder"] = {"status": "unavailable"}
+            degraded = True
+    except Exception as exc:
+        components["embedder"] = {"status": "error", "error": str(exc)}
+        degraded = True
+
+    # Search mode
+    search_mode = "unavailable"
+    if _search_engine is not None:
+        search_mode = _search_engine.mode
+
+    if not overall_ok:
+        status = "unhealthy"
+    elif degraded:
+        status = "degraded"
+    else:
+        status = "healthy"
+
+    return {
+        "status": status,
+        "search_mode": search_mode,
+        "is_indexing": _indexing,
+        "components": components,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -457,7 +647,56 @@ async def remove_folder(folder_path: str) -> dict[str, str]:
     _config = Config(**config_data)
     _config.save()
 
+    # Also clean up indexed data from this folder
+    if _store:
+        deleted = _store.delete_documents_by_prefix(str(p))
+        if deleted > 0:
+            logger.info("Cleaned up %d indexed documents from removed folder: %s", deleted, p)
+            # Rebuild search engine index
+            if _engine:
+                _engine.clear()
+                _warm_from_store()
+
     return {"status": "ok", "removed": str(p)}
+
+
+@router.delete("/index/clear")
+async def clear_index() -> dict[str, str | int]:
+    """Clear the entire index — removes all indexed documents and chunks."""
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Store not initialized")
+
+    docs, chunks = _store.clear_all()
+
+    # Clear search engine
+    if _engine:
+        _engine.clear()
+
+    # Remove embeddings files
+    import shutil
+    emb_dir = _config.data_dir / "embeddings"
+    if emb_dir.exists():
+        shutil.rmtree(emb_dir)
+        emb_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info("Cleared index: %d documents, %d chunks removed", docs, chunks)
+    return {"status": "ok", "documents_removed": docs, "chunks_removed": chunks}
+
+
+@router.delete("/index/folder/{folder_path:path}")
+async def clear_folder_index(folder_path: str) -> dict[str, str | int]:
+    """Clear indexed data for a specific folder without removing it from the watch list."""
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Store not initialized")
+
+    p = Path(folder_path).expanduser().resolve()
+    deleted = _store.delete_documents_by_prefix(str(p))
+
+    if deleted > 0 and _engine:
+        _engine.clear()
+        _warm_from_store()
+
+    return {"status": "ok", "folder": str(p), "documents_removed": deleted}
 
 
 @router.get("/browse-directories")

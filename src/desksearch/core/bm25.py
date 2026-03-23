@@ -1,14 +1,32 @@
-"""BM25 index wrapper using tantivy-py for fast full-text search."""
+"""BM25 index wrapper using tantivy-py for fast full-text search.
+
+Thread-safety: write operations (add / delete) acquire a threading.Lock.
+tantivy itself serialises index writers, but the Python binding can raise
+concurrency errors without explicit locking; the lock makes it safe.
+
+Graceful degradation: if tantivy is unavailable or the index directory is
+corrupt, ``BM25Index`` sets ``self.available = False`` and all methods
+return safe empty results rather than raising.
+"""
 
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
-import tantivy
-
 logger = logging.getLogger(__name__)
+
+try:
+    import tantivy
+    _TANTIVY_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _TANTIVY_AVAILABLE = False
+    logger.error(
+        "tantivy-py is not installed — BM25 search will be unavailable. "
+        "Install with: pip install tantivy"
+    )
 
 
 class BM25Index:
@@ -16,14 +34,35 @@ class BM25Index:
 
     Stores documents with a doc_id (string) and body text.
     Persists to disk so the index survives restarts.
+
+    ``available`` is False when tantivy is missing or the index is
+    irrecoverably corrupt.  Callers should fall back to dense-only search.
     """
 
     def __init__(self, data_dir: Path) -> None:
         self._index_dir = data_dir / "bm25"
         self._index_dir.mkdir(parents=True, exist_ok=True)
 
-        self._schema = self._build_schema()
-        self._index = tantivy.Index(self._schema, path=str(self._index_dir))
+        # Serialise write operations — tantivy's Python binding doesn't
+        # guarantee thread-safety for concurrent writers.
+        self._write_lock = threading.Lock()
+
+        self.available: bool = _TANTIVY_AVAILABLE
+        self._index: Optional[tantivy.Index] = None
+
+        if self.available:
+            self._schema = self._build_schema()
+            try:
+                self._index = tantivy.Index(self._schema, path=str(self._index_dir))
+            except Exception as exc:
+                logger.error(
+                    "Failed to open BM25 index at %s (corrupt?): %s. "
+                    "BM25 search will be unavailable for this session.",
+                    self._index_dir,
+                    exc,
+                    exc_info=True,
+                )
+                self.available = False
 
     # ------------------------------------------------------------------
     # Schema
@@ -42,42 +81,69 @@ class BM25Index:
 
     def add_document(self, doc_id: str, body: str) -> None:
         """Add or update a single document in the index."""
-        writer = self._index.writer()
-        try:
-            # Delete any existing document with the same doc_id first.
-            writer.delete_documents("doc_id", doc_id)
-            writer.add_document(tantivy.Document(doc_id=doc_id, body=body))
-            writer.commit()
-        except Exception:
-            writer.rollback()
-            raise
-        self._index.reload()
+        if not self.available or self._index is None:
+            return
+        with self._write_lock:
+            writer = self._index.writer()
+            try:
+                writer.delete_documents("doc_id", doc_id)
+                writer.add_document(tantivy.Document(doc_id=doc_id, body=body))
+                writer.commit()
+            except Exception as exc:
+                logger.error("BM25 add_document failed for %r: %s", doc_id, exc)
+                try:
+                    writer.rollback()
+                except Exception:
+                    pass
+                return
+            try:
+                self._index.reload()
+            except Exception as exc:
+                logger.warning("BM25 reload failed after add_document: %s", exc)
 
     def add_documents(self, docs: list[tuple[str, str]]) -> None:
         """Batch-add documents as (doc_id, body) pairs."""
-        if not docs:
+        if not docs or not self.available or self._index is None:
             return
-        writer = self._index.writer()
-        try:
-            for doc_id, body in docs:
-                writer.delete_documents("doc_id", doc_id)
-                writer.add_document(tantivy.Document(doc_id=doc_id, body=body))
-            writer.commit()
-        except Exception:
-            writer.rollback()
-            raise
-        self._index.reload()
+        with self._write_lock:
+            writer = self._index.writer()
+            try:
+                for doc_id, body in docs:
+                    writer.delete_documents("doc_id", doc_id)
+                    writer.add_document(tantivy.Document(doc_id=doc_id, body=body))
+                writer.commit()
+            except Exception as exc:
+                logger.error("BM25 add_documents batch failed: %s", exc)
+                try:
+                    writer.rollback()
+                except Exception:
+                    pass
+                return
+            try:
+                self._index.reload()
+            except Exception as exc:
+                logger.warning("BM25 reload failed after add_documents: %s", exc)
 
     def delete_document(self, doc_id: str) -> None:
         """Remove a document by doc_id."""
-        writer = self._index.writer()
-        try:
-            writer.delete_documents("doc_id", doc_id)
-            writer.commit()
-        except Exception:
-            writer.rollback()
-            raise
-        self._index.reload()
+        if not self.available or self._index is None:
+            return
+        with self._write_lock:
+            writer = self._index.writer()
+            try:
+                writer.delete_documents("doc_id", doc_id)
+                writer.commit()
+            except Exception as exc:
+                logger.error("BM25 delete_document failed for %r: %s", doc_id, exc)
+                try:
+                    writer.rollback()
+                except Exception:
+                    pass
+                return
+            try:
+                self._index.reload()
+            except Exception as exc:
+                logger.warning("BM25 reload failed after delete_document: %s", exc)
 
     # ------------------------------------------------------------------
     # Search
@@ -86,15 +152,16 @@ class BM25Index:
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         """Search the index, returning a list of (doc_id, score) tuples.
 
-        Returns results sorted by descending BM25 score.
+        Returns an empty list (rather than raising) on any error.
         """
+        if not self.available or self._index is None:
+            return []
         if not query.strip():
             return []
 
-        searcher = self._index.searcher()
-        parsed_query = self._index.parse_query(query, ["body"])
-
         try:
+            searcher = self._index.searcher()
+            parsed_query = self._index.parse_query(query, ["body"])
             results = searcher.search(parsed_query, top_k).hits
         except Exception as exc:
             logger.warning("BM25 search failed for query %r: %s", query, exc)
@@ -102,24 +169,39 @@ class BM25Index:
 
         scored: list[tuple[str, float]] = []
         for score, best_doc_address in results:
-            doc = searcher.doc(best_doc_address)
-            doc_id = doc["doc_id"][0]
-            scored.append((doc_id, float(score)))
+            try:
+                doc = searcher.doc(best_doc_address)
+                doc_id = doc["doc_id"][0]
+                scored.append((doc_id, float(score)))
+            except Exception as exc:
+                logger.warning("BM25 result fetch failed: %s", exc)
+                continue
 
         return scored
 
     def get_document(self, doc_id: str) -> Optional[str]:
         """Retrieve the body text for a specific doc_id, or None."""
-        searcher = self._index.searcher()
-        query = self._index.parse_query(f'"{doc_id}"', ["doc_id"])
-        results = searcher.search(query, 1).hits
-        if not results:
+        if not self.available or self._index is None:
             return None
-        _, addr = results[0]
-        doc = searcher.doc(addr)
-        return doc["body"][0]
+        try:
+            searcher = self._index.searcher()
+            query = self._index.parse_query(f'"{doc_id}"', ["doc_id"])
+            results = searcher.search(query, 1).hits
+            if not results:
+                return None
+            _, addr = results[0]
+            doc = searcher.doc(addr)
+            return doc["body"][0]
+        except Exception as exc:
+            logger.warning("BM25 get_document failed for %r: %s", doc_id, exc)
+            return None
 
     @property
     def doc_count(self) -> int:
         """Return the number of documents in the index."""
-        return self._index.searcher().num_docs
+        if not self.available or self._index is None:
+            return 0
+        try:
+            return self._index.searcher().num_docs
+        except Exception:
+            return 0

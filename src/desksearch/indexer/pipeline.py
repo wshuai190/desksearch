@@ -171,6 +171,10 @@ class IndexingPipeline:
     def index_file(self, path: Path) -> Generator[IndexStatus, None, Optional[np.ndarray]]:
         """Index a single file through the full pipeline.
 
+        Crash recovery: marks the file as 'indexing' in the store before
+        processing begins.  If the process exits before finishing, the next
+        run detects the 'indexing' state and re-tries the file.
+
         Yields status updates and returns the embeddings array (or None on failure).
         """
         file_t0 = time.perf_counter()
@@ -181,12 +185,20 @@ class IndexingPipeline:
             yield IndexStatus(StatusType.SKIPPED, str(path), "Already up to date")
             return None
 
+        # Mark as in-progress BEFORE we do any work so that a crash mid-way
+        # is detectable on the next run via needs_indexing().
+        try:
+            self.store.mark_indexing_started(path)
+        except Exception as exc:
+            logger.warning("[%s] Could not mark indexing started: %s", path.name, exc)
+
         # Parse
         yield IndexStatus(StatusType.PARSING, str(path))
         t0 = time.perf_counter()
         text = parse_file(path)
         parse_ms = (time.perf_counter() - t0) * 1000
         if text is None:
+            self._mark_failed(path)
             yield IndexStatus(StatusType.ERROR, str(path), "Failed to parse")
             return None
         logger.info("[%s] parse: %.0fms (%d chars)", path.name, parse_ms, len(text))
@@ -202,6 +214,7 @@ class IndexingPipeline:
         )
         chunk_ms = (time.perf_counter() - t0) * 1000
         if not chunks:
+            self._mark_failed(path)
             yield IndexStatus(StatusType.ERROR, str(path), "No chunks produced")
             return None
         logger.info("[%s] chunk: %.0fms (%d chunks)", path.name, chunk_ms, len(chunks))
@@ -210,29 +223,42 @@ class IndexingPipeline:
         yield IndexStatus(StatusType.EMBEDDING, str(path), f"{len(chunks)} chunks")
         t0 = time.perf_counter()
         chunk_texts = [c.text for c in chunks]
-        embeddings = self.embedder.embed(chunk_texts)
+        try:
+            embeddings = self.embedder.embed(chunk_texts)
+        except Exception as exc:
+            self._mark_failed(path)
+            yield IndexStatus(StatusType.ERROR, str(path), f"Embedding failed: {exc}")
+            return None
         embed_ms = (time.perf_counter() - t0) * 1000
         logger.info("[%s] embed: %.0fms (%d chunks)", path.name, embed_ms, len(chunks))
 
         # Store metadata
         yield IndexStatus(StatusType.STORING, str(path))
         t0 = time.perf_counter()
-        doc_id = self.store.upsert_document(path, num_chunks=len(chunks))
-        chunk_ids = self.store.add_chunks(
-            doc_id,
-            [(c.text, c.chunk_index, c.char_offset) for c in chunks],
-        )
+        try:
+            doc_id = self.store.upsert_document(path, num_chunks=len(chunks))
+            chunk_ids = self.store.add_chunks(
+                doc_id,
+                [(c.text, c.chunk_index, c.char_offset) for c in chunks],
+            )
+        except Exception as exc:
+            self._mark_failed(path)
+            yield IndexStatus(StatusType.ERROR, str(path), f"Store failed: {exc}")
+            return None
         store_ms = (time.perf_counter() - t0) * 1000
         logger.info("[%s] store: %.0fms", path.name, store_ms)
 
         # Feed into search engine if available
         t0 = time.perf_counter()
         if self.search_engine is not None:
-            docs = [
-                (str(cid), ct, emb)
-                for cid, ct, emb in zip(chunk_ids, chunk_texts, embeddings)
-            ]
-            self.search_engine.add_documents(docs)
+            try:
+                docs = [
+                    (str(cid), ct, emb)
+                    for cid, ct, emb in zip(chunk_ids, chunk_texts, embeddings)
+                ]
+                self.search_engine.add_documents(docs)
+            except Exception as exc:
+                logger.warning("[%s] Search engine update failed: %s", path.name, exc)
         index_ms = (time.perf_counter() - t0) * 1000
         logger.info("[%s] index: %.0fms", path.name, index_ms)
 
@@ -243,6 +269,13 @@ class IndexingPipeline:
         )
         yield IndexStatus(StatusType.COMPLETE, str(path), f"{len(chunks)} chunks indexed")
         return embeddings
+
+    def _mark_failed(self, path: Path) -> None:
+        """Mark a file's indexing state as failed (best-effort)."""
+        try:
+            self.store.mark_indexing_failed(path)
+        except Exception as exc:
+            logger.warning("Could not mark indexing failed for %s: %s", path.name, exc)
 
     def index_directory(
         self,
@@ -298,7 +331,17 @@ class IndexingPipeline:
             # Use ONNX_INNER_BATCH for the actual session.run() call size so
             # we control peak memory while still amortising call overhead over
             # a large accumulated batch.
-            embeddings = self.embedder.embed(pending_chunk_texts, batch_size=ONNX_INNER_BATCH)
+            try:
+                embeddings = self.embedder.embed(pending_chunk_texts, batch_size=ONNX_INNER_BATCH)
+            except Exception as exc:
+                logger.error("Batch embedding failed: %s", exc, exc_info=True)
+                # Mark all pending files as failed
+                for pf in pending_files:
+                    self._mark_failed(pf.path)
+                pending_files.clear()
+                pending_chunk_texts.clear()
+                return []
+
             embed_ms = (time.perf_counter() - t0) * 1000
             logger.info("batch embed: %.0fms (%d chunks)", embed_ms, len(pending_chunk_texts))
 
@@ -311,19 +354,27 @@ class IndexingPipeline:
                 emb_offset += num_chunks
 
                 t0 = time.perf_counter()
-                doc_id = self.store.upsert_document(pf.path, num_chunks=num_chunks)
-                chunk_ids = self.store.add_chunks(
-                    doc_id,
-                    [(c.text, c.chunk_index, c.char_offset) for c in pf.chunks],
-                )
+                try:
+                    doc_id = self.store.upsert_document(pf.path, num_chunks=num_chunks)
+                    chunk_ids = self.store.add_chunks(
+                        doc_id,
+                        [(c.text, c.chunk_index, c.char_offset) for c in pf.chunks],
+                    )
+                except Exception as exc:
+                    logger.error("[%s] Store failed: %s", pf.path.name, exc, exc_info=True)
+                    self._mark_failed(pf.path)
+                    continue
 
                 # Feed into search engine if available
                 if self.search_engine is not None:
-                    docs = [
-                        (str(cid), ct, emb)
-                        for cid, ct, emb in zip(chunk_ids, pf.chunk_texts, file_embeddings)
-                    ]
-                    self.search_engine.add_documents(docs)
+                    try:
+                        docs = [
+                            (str(cid), ct, emb)
+                            for cid, ct, emb in zip(chunk_ids, pf.chunk_texts, file_embeddings)
+                        ]
+                        self.search_engine.add_documents(docs)
+                    except Exception as exc:
+                        logger.warning("[%s] Search engine update failed: %s", pf.path.name, exc)
 
                 store_idx_ms = (time.perf_counter() - t0) * 1000
                 logger.info("[%s] store+index: %.0fms", pf.path.name, store_idx_ms)
@@ -382,6 +433,14 @@ class IndexingPipeline:
                 # Keep the window full: submit next file while we wait
                 _submit_next()
 
+                # Mark as in-progress for crash recovery BEFORE blocking on
+                # the future result.  If the process exits now, the next run
+                # will re-index this file (needs_indexing returns True).
+                try:
+                    self.store.mark_indexing_started(file_path)
+                except Exception as exc:
+                    logger.debug("mark_indexing_started failed for %s: %s", file_path.name, exc)
+
                 # Yield PARSING status immediately (non-blocking — the future
                 # is likely already running or complete in a background thread)
                 yield IndexStatus(
@@ -407,6 +466,7 @@ class IndexingPipeline:
                 if error or pending_file is None:
                     if error not in ("parse_failed", "no_chunks"):
                         yield IndexStatus(StatusType.ERROR, str(file_path), error or "unknown error")
+                    self._mark_failed(file_path)
                     errors += 1
                     continue
 

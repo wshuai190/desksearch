@@ -9,14 +9,20 @@ export default {
           '0%': { opacity: '0', transform: 'translateY(4px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        slideDown: {
+          '0%': { opacity: '0', transform: 'translateY(-8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
       },
       animation: {
         fadeIn: 'fadeIn 0.2s ease-out forwards',
+        slideDown: 'slideDown 0.15s ease-out forwards',
       },
       colors: {
         dark: {
           bg: '#0a0a0a',
           surface: '#141414',
+          card: '#1a1a1a',
           border: '#262626',
           hover: '#1a1a1a',
         },

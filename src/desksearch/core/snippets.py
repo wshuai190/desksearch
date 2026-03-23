@@ -27,6 +27,10 @@ class QueryMatcher(NamedTuple):
     terms: list[str]
 
 
+# Sentence-boundary pattern for snapping windows to sentence starts/ends.
+_SENT_END_RE = re.compile(r'[.!?]+[\s]+')
+
+
 def make_query_pattern(query: str) -> QueryMatcher | None:
     """Compile a combined regex + term list for all terms in *query*.
 
@@ -58,13 +62,16 @@ def extract_snippets_with_pattern(
     text: str,
     matcher: QueryMatcher | None,
     max_snippets: int = 3,
-    context_chars: int = 120,
+    context_chars: int = 150,
     highlight_tag: tuple[str, str] = ("<mark>", "</mark>"),
 ) -> list[Snippet]:
     """Extract snippets using a pre-compiled :class:`QueryMatcher`.
 
     Prefer this over :func:`extract_snippets` when processing many documents
     for the same query — the pattern is compiled exactly once.
+
+    The returned snippets show the *most relevant* part of the text (highest
+    term density and unique-term coverage), not just the beginning.
     """
     if not text or matcher is None:
         return []
@@ -81,7 +88,7 @@ def extract_snippets(
     text: str,
     query: str,
     max_snippets: int = 3,
-    context_chars: int = 120,
+    context_chars: int = 150,
     highlight_tag: tuple[str, str] = ("<mark>", "</mark>"),
 ) -> list[Snippet]:
     """Extract the most relevant snippets from text given a query.
@@ -163,6 +170,48 @@ def _tokenize_query(query: str) -> list[str]:
     return [t for t in tokens if t not in stop_words and len(t) > 1]
 
 
+def _snap_to_sentence_boundary(text: str, start: int, end: int) -> tuple[int, int]:
+    """Expand/contract (start, end) to align with sentence boundaries.
+
+    * Start is moved *back* to the beginning of the sentence that contains it.
+    * End is moved *forward* to the end of the sentence that contains it.
+
+    This avoids mid-sentence cuts in the displayed snippet.
+    """
+    text_len = len(text)
+
+    # --- Snap start backward to the sentence start ---
+    # Look for the most recent sentence-ending punctuation before `start`.
+    look_back = max(0, start - 200)
+    prefix = text[look_back:start]
+    # Find the last sentence-end marker in the look-back region.
+    last_end = None
+    for m in _SENT_END_RE.finditer(prefix):
+        last_end = m
+    if last_end is not None:
+        new_start = look_back + last_end.end()
+    else:
+        # Fall back to the nearest word boundary
+        space = text.rfind(" ", look_back, start)
+        new_start = (space + 1) if space != -1 else start
+
+    # --- Snap end forward to the sentence end ---
+    look_ahead = min(text_len, end + 200)
+    suffix = text[end:look_ahead]
+    m_end = _SENT_END_RE.search(suffix)
+    if m_end:
+        new_end = end + m_end.start() + 1  # include the punctuation
+    else:
+        # Fall back to word boundary
+        space = text.find(" ", end, end + 50)
+        new_end = space if space != -1 else end
+
+    # Clamp
+    new_start = max(0, min(new_start, start))
+    new_end = min(text_len, max(new_end, end))
+    return new_start, new_end
+
+
 def _best_windows(
     text: str,
     matches: list[re.Match],
@@ -172,32 +221,48 @@ def _best_windows(
 ) -> list[tuple[int, int]]:
     """Select the best non-overlapping text windows around matches.
 
-    Scores each window by:
-    - Number of unique query terms covered
-    - Density of matches (more matches in fewer chars = better)
+    Windows are scored by:
+    1. Unique query terms covered (primary — strongly preferred)
+    2. Match density (secondary — more hits in fewer chars)
+
+    Windows are snapped to sentence boundaries for cleaner display.
     """
     text_len = len(text)
     candidates: list[tuple[float, int, int]] = []
 
-    for match in matches:
-        center = (match.start() + match.end()) // 2
+    # Group nearby matches into clusters for better window selection
+    clusters: list[list[re.Match]] = []
+    if matches:
+        current_cluster = [matches[0]]
+        for m in matches[1:]:
+            if m.start() - current_cluster[-1].end() <= context_chars * 2:
+                current_cluster.append(m)
+            else:
+                clusters.append(current_cluster)
+                current_cluster = [m]
+        clusters.append(current_cluster)
+
+    for cluster in clusters:
+        # Centre the window on the midpoint of the cluster
+        cluster_start = cluster[0].start()
+        cluster_end = cluster[-1].end()
+        center = (cluster_start + cluster_end) // 2
+
         start = max(0, center - context_chars)
         end = min(text_len, center + context_chars)
 
-        # Snap to word boundaries
-        if start > 0:
-            space = text.rfind(" ", start - 30, start)
-            if space != -1:
-                start = space + 1
-        if end < text_len:
-            space = text.find(" ", end, end + 30)
-            if space != -1:
-                end = space
+        # Snap to sentence boundaries
+        start, end = _snap_to_sentence_boundary(text, start, end)
 
-        # Score: unique terms in window + density bonus
+        # Score: strongly reward unique terms, then add density bonus
         window_text = text[start:end].lower()
-        unique_terms = sum(1 for t in terms if t in window_text)
-        score = unique_terms + 0.1 * (unique_terms / max(1, end - start) * 100)
+        n_unique = sum(1 for t in terms if t in window_text)
+        n_matches = len([m for m in cluster if start <= m.start() < end])
+        window_len = max(1, end - start)
+        density = n_matches / (window_len / 100)
+
+        # Primary weight: unique terms count (×10) + density bonus
+        score = n_unique * 10.0 + density
 
         candidates.append((score, start, end))
 

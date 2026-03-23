@@ -86,3 +86,47 @@ class Config(BaseModel):
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, "w") as f:
             json.dump(self.model_dump(mode="json"), f, indent=2, default=str)
+
+    def validate(self) -> list[str]:
+        """Validate configuration and return a list of warning/error strings.
+
+        Does NOT raise — callers should log the returned messages and decide
+        whether to abort.  An empty list means everything looks fine.
+        """
+        import socket
+        issues: list[str] = []
+
+        # chunk_overlap must be smaller than chunk_size
+        if self.chunk_overlap >= self.chunk_size:
+            issues.append(
+                f"chunk_overlap ({self.chunk_overlap}) must be less than "
+                f"chunk_size ({self.chunk_size})"
+            )
+
+        # data_dir must be creatable
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            issues.append(f"Cannot create data_dir {self.data_dir}: {exc}")
+
+        # Warn about missing index_paths (they may be created later)
+        for p in self.index_paths:
+            expanded = Path(str(p)).expanduser()
+            if not expanded.exists():
+                issues.append(f"Index path does not exist (will be skipped): {p}")
+
+        # Check port availability
+        if self.port < 1 or self.port > 65535:
+            issues.append(f"Invalid port number: {self.port}")
+        else:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    s.bind((self.host, self.port))
+            except OSError as exc:
+                issues.append(
+                    f"Port {self.port} on {self.host} is not available: {exc}. "
+                    "Another process may already be using it."
+                )
+
+        return issues

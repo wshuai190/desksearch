@@ -33,3 +33,8 @@
     @apply bg-accent-blue/20 text-accent-blue font-medium rounded px-0.5;
   }
 }
+
+/* Override browser default <mark> yellow to use our themed highlight */
+mark {
+  background: transparent;
+}

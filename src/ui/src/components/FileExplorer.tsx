@@ -190,9 +190,31 @@ export default function FileExplorer() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-400">Loading...</td></tr>
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i} className="border-t border-gray-100 dark:border-dark-border animate-pulse">
+                  <td className="px-3 py-2.5"><div className="w-3.5 h-3.5 bg-gray-200 dark:bg-dark-border rounded" /></td>
+                  <td className="px-3 py-2.5"><div className="h-3.5 bg-gray-200 dark:bg-dark-border rounded w-32" /></td>
+                  <td className="px-3 py-2.5"><div className="h-5 bg-gray-200 dark:bg-dark-border rounded w-10" /></td>
+                  <td className="px-3 py-2.5"><div className="h-3.5 bg-gray-200 dark:bg-dark-border rounded w-16" /></td>
+                  <td className="px-3 py-2.5"><div className="h-3.5 bg-gray-200 dark:bg-dark-border rounded w-20" /></td>
+                  <td className="px-3 py-2.5"><div className="h-3.5 bg-gray-200 dark:bg-dark-border rounded w-8" /></td>
+                  <td className="px-3 py-2.5"><div className="h-3.5 bg-gray-200 dark:bg-dark-border rounded w-20" /></td>
+                </tr>
+              ))
             ) : files.length === 0 ? (
-              <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-400">No files found</td></tr>
+              <tr>
+                <td colSpan={7}>
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="w-12 h-12 rounded-full bg-gray-100 dark:bg-dark-border flex items-center justify-center mb-3">
+                      <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                    </div>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">No files found</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Try a different filter or add folders to index</p>
+                  </div>
+                </td>
+              </tr>
             ) : (
               files.map((f) => (
                 <tr

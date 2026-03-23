@@ -29,6 +29,13 @@ class SearchResult(BaseModel):
     modified: Optional[datetime] = Field(
         default=None, description="Last modified timestamp"
     )
+    other_chunk_count: int = Field(
+        default=0,
+        description="Number of additional matching chunks from the same file that were deduplicated",
+    )
+    file_size: Optional[int] = Field(
+        default=None, description="File size in bytes"
+    )
 
 
 class SearchResponse(BaseModel):

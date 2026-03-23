@@ -2,8 +2,19 @@
 
 Stores document metadata and chunk text for retrieval. Supports checking
 whether files need re-indexing based on modification time.
+
+Thread-safety: a threading.Lock serialises all write operations so the
+pipeline (thread-pool) and the API (async) can coexist without corruption.
+Reads share the same connection (SQLite WAL mode) and don't hold the lock
+so searches are never blocked by concurrent indexing writes.
+
+Error recovery: each file carries an ``indexing_state`` column that is set
+to ``'indexing'`` before processing begins and updated to ``'done'`` or
+``'failed'`` once finished.  If the process crashes mid-way, the next run
+sees ``indexing_state='indexing'`` and re-indexes the file from scratch.
 """
 import sqlite3
+import threading
 import time
 import logging
 from pathlib import Path
@@ -11,6 +22,11 @@ from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# Valid values for the indexing_state column.
+STATE_DONE = "done"
+STATE_INDEXING = "indexing"
+STATE_FAILED = "failed"
 
 
 @dataclass
@@ -25,6 +41,7 @@ class DocumentRecord:
     modified_time: float
     indexed_time: float
     num_chunks: int
+    indexing_state: str = STATE_DONE
 
 
 @dataclass
@@ -45,6 +62,9 @@ class MetadataStore:
         self.db_path = db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: Optional[sqlite3.Connection] = None
+        # Serialise all write operations so the pipeline thread-pool and the
+        # async API route handlers cannot interleave writes.
+        self._write_lock = threading.Lock()
         self._init_db()
 
     @property
@@ -68,40 +88,126 @@ class MetadataStore:
         return self._conn
 
     def _init_db(self) -> None:
-        """Create tables if they don't exist."""
-        self.conn.executescript("""
-            CREATE TABLE IF NOT EXISTS documents (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                path TEXT UNIQUE NOT NULL,
-                filename TEXT NOT NULL,
-                extension TEXT NOT NULL,
-                size INTEGER NOT NULL,
-                modified_time REAL NOT NULL,
-                indexed_time REAL NOT NULL,
-                num_chunks INTEGER NOT NULL DEFAULT 0
-            );
+        """Create tables and run migrations if needed."""
+        with self._write_lock:
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    path TEXT UNIQUE NOT NULL,
+                    filename TEXT NOT NULL,
+                    extension TEXT NOT NULL,
+                    size INTEGER NOT NULL,
+                    modified_time REAL NOT NULL,
+                    indexed_time REAL NOT NULL,
+                    num_chunks INTEGER NOT NULL DEFAULT 0
+                );
 
-            CREATE TABLE IF NOT EXISTS chunks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                doc_id INTEGER NOT NULL,
-                text TEXT NOT NULL,
-                chunk_index INTEGER NOT NULL,
-                char_offset INTEGER NOT NULL,
-                FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
-            );
+                CREATE TABLE IF NOT EXISTS chunks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    chunk_index INTEGER NOT NULL,
+                    char_offset INTEGER NOT NULL,
+                    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path);
-            CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id);
-        """)
-        self.conn.commit()
+                CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path);
+                CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id);
+            """)
+            self.conn.commit()
+
+            # Migration: add indexing_state column if missing.
+            # ALTER TABLE … ADD COLUMN has no IF NOT EXISTS, so we catch the
+            # OperationalError that fires when the column already exists.
+            try:
+                self.conn.execute(
+                    f"ALTER TABLE documents ADD COLUMN indexing_state TEXT NOT NULL DEFAULT '{STATE_DONE}'"
+                )
+                self.conn.commit()
+                logger.debug("Migration: added indexing_state column to documents table")
+            except sqlite3.OperationalError:
+                pass  # Column already exists — nothing to do
+
+    # ------------------------------------------------------------------
+    # Indexing state management (crash recovery)
+    # ------------------------------------------------------------------
+
+    def mark_indexing_started(self, path: Path) -> None:
+        """Mark a file as currently being indexed.
+
+        Called before we begin processing a file so that a crash mid-way
+        is detectable on the next run (``needs_indexing`` returns True for
+        any file whose state is 'indexing').
+        """
+        now = time.time()
+        stat = path.stat()
+        with self._write_lock:
+            self.conn.execute(
+                """INSERT INTO documents
+                       (path, filename, extension, size, modified_time, indexed_time,
+                        num_chunks, indexing_state)
+                   VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+                   ON CONFLICT(path) DO UPDATE SET
+                       size = excluded.size,
+                       modified_time = excluded.modified_time,
+                       indexed_time = excluded.indexed_time,
+                       indexing_state = excluded.indexing_state""",
+                (
+                    str(path),
+                    path.name,
+                    path.suffix.lower(),
+                    stat.st_size,
+                    stat.st_mtime,
+                    now,
+                    STATE_INDEXING,
+                ),
+            )
+            self.conn.commit()
+
+    def mark_indexing_done(self, path: Path) -> None:
+        """Mark a file's indexing as successfully complete."""
+        with self._write_lock:
+            self.conn.execute(
+                "UPDATE documents SET indexing_state = ? WHERE path = ?",
+                (STATE_DONE, str(path)),
+            )
+            self.conn.commit()
+
+    def mark_indexing_failed(self, path: Path) -> None:
+        """Mark a file's indexing as failed so it will be retried next run."""
+        with self._write_lock:
+            self.conn.execute(
+                "UPDATE documents SET indexing_state = ? WHERE path = ?",
+                (STATE_FAILED, str(path)),
+            )
+            self.conn.commit()
+
+    # ------------------------------------------------------------------
+    # Core helpers
+    # ------------------------------------------------------------------
 
     def needs_indexing(self, path: Path) -> bool:
-        """Check if a file needs (re-)indexing based on modification time."""
+        """Return True if the file needs (re-)indexing.
+
+        True when:
+        - the file has never been indexed, OR
+        - the file was modified since last indexed, OR
+        - a previous indexing attempt was interrupted (state='indexing'), OR
+        - a previous indexing attempt failed (state='failed').
+        """
         row = self.conn.execute(
-            "SELECT modified_time FROM documents WHERE path = ?",
+            "SELECT modified_time, indexing_state FROM documents WHERE path = ?",
             (str(path),),
         ).fetchone()
         if row is None:
+            return True
+        # Crashed mid-way or explicitly failed → always retry
+        if row["indexing_state"] in (STATE_INDEXING, STATE_FAILED):
+            logger.debug(
+                "File %s has state '%s' → scheduling re-index",
+                path.name,
+                row["indexing_state"],
+            )
             return True
         return path.stat().st_mtime > row["modified_time"]
 
@@ -113,7 +219,7 @@ class MetadataStore:
         ).fetchone()
         if row is None:
             return None
-        return DocumentRecord(**dict(row))
+        return self._row_to_doc(row)
 
     def get_document_by_id(self, doc_id: int) -> Optional[DocumentRecord]:
         """Get a document record by ID."""
@@ -123,45 +229,62 @@ class MetadataStore:
         ).fetchone()
         if row is None:
             return None
-        return DocumentRecord(**dict(row))
+        return self._row_to_doc(row)
+
+    @staticmethod
+    def _row_to_doc(row) -> DocumentRecord:
+        d = dict(row)
+        # indexing_state may be absent in old rows fetched before migration
+        d.setdefault("indexing_state", STATE_DONE)
+        return DocumentRecord(**d)
 
     def upsert_document(
         self,
         path: Path,
         num_chunks: int,
     ) -> int:
-        """Insert or update a document record. Returns the document ID."""
+        """Insert or update a document record. Returns the document ID.
+
+        Sets indexing_state to 'done' on the assumption that upsert is called
+        only after chunks have been written.  Use ``mark_indexing_started``
+        before you begin processing a file to get crash-recovery semantics.
+        """
         stat = path.stat()
         now = time.time()
 
-        # Delete old chunks if document exists
-        existing = self.get_document(path)
-        if existing:
-            self.conn.execute("DELETE FROM chunks WHERE doc_id = ?", (existing.id,))
-            self.conn.execute(
-                """UPDATE documents
-                   SET size = ?, modified_time = ?, indexed_time = ?, num_chunks = ?
-                   WHERE id = ?""",
-                (stat.st_size, stat.st_mtime, now, num_chunks, existing.id),
+        with self._write_lock:
+            # Delete old chunks if document exists
+            existing = self.get_document(path)
+            if existing:
+                self.conn.execute("DELETE FROM chunks WHERE doc_id = ?", (existing.id,))
+                self.conn.execute(
+                    """UPDATE documents
+                       SET size = ?, modified_time = ?, indexed_time = ?,
+                           num_chunks = ?, indexing_state = ?
+                       WHERE id = ?""",
+                    (stat.st_size, stat.st_mtime, now, num_chunks, STATE_DONE, existing.id),
+                )
+                self.conn.commit()
+                return existing.id
+
+            cursor = self.conn.execute(
+                """INSERT INTO documents
+                       (path, filename, extension, size, modified_time, indexed_time,
+                        num_chunks, indexing_state)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    str(path),
+                    path.name,
+                    path.suffix.lower(),
+                    stat.st_size,
+                    stat.st_mtime,
+                    now,
+                    num_chunks,
+                    STATE_DONE,
+                ),
             )
             self.conn.commit()
-            return existing.id
-
-        cursor = self.conn.execute(
-            """INSERT INTO documents (path, filename, extension, size, modified_time, indexed_time, num_chunks)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                str(path),
-                path.name,
-                path.suffix.lower(),
-                stat.st_size,
-                stat.st_mtime,
-                now,
-                num_chunks,
-            ),
-        )
-        self.conn.commit()
-        return cursor.lastrowid
+            return cursor.lastrowid
 
     def add_chunks(self, doc_id: int, chunks: list[tuple[str, int, int]]) -> list[int]:
         """Add chunks for a document.
@@ -175,17 +298,18 @@ class MetadataStore:
         """
         if not chunks:
             return []
-        cursor = self.conn.cursor()
-        cursor.executemany(
-            "INSERT INTO chunks (doc_id, text, chunk_index, char_offset) VALUES (?, ?, ?, ?)",
-            [(doc_id, text, chunk_index, char_offset) for text, chunk_index, char_offset in chunks],
-        )
-        self.conn.commit()
-        # cursor.lastrowid is None after executemany in Python 3.12+ (PEP 249 compliance).
-        # Use last_insert_rowid() instead — it's always accurate after a commit.
-        last_id: int = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-        first_id = last_id - len(chunks) + 1
-        return list(range(first_id, last_id + 1))
+        with self._write_lock:
+            cursor = self.conn.cursor()
+            cursor.executemany(
+                "INSERT INTO chunks (doc_id, text, chunk_index, char_offset) VALUES (?, ?, ?, ?)",
+                [(doc_id, text, chunk_index, char_offset) for text, chunk_index, char_offset in chunks],
+            )
+            self.conn.commit()
+            # cursor.lastrowid is None after executemany in Python 3.12+ (PEP 249 compliance).
+            # Use last_insert_rowid() instead — it's always accurate after a commit.
+            last_id: int = self.conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            first_id = last_id - len(chunks) + 1
+            return list(range(first_id, last_id + 1))
 
     def get_chunks(self, doc_id: int) -> list[ChunkRecord]:
         """Get all chunks for a document, ordered by chunk_index."""
@@ -210,15 +334,16 @@ class MetadataStore:
         existing = self.get_document(path)
         if existing is None:
             return False
-        # Chunks cascade-deleted via foreign key
-        self.conn.execute("DELETE FROM documents WHERE id = ?", (existing.id,))
-        self.conn.commit()
+        with self._write_lock:
+            # Chunks cascade-deleted via foreign key
+            self.conn.execute("DELETE FROM documents WHERE id = ?", (existing.id,))
+            self.conn.commit()
         return True
 
     def all_documents(self) -> list[DocumentRecord]:
         """Return all document records."""
         rows = self.conn.execute("SELECT * FROM documents ORDER BY path").fetchall()
-        return [DocumentRecord(**dict(row)) for row in rows]
+        return [self._row_to_doc(row) for row in rows]
 
     def document_count(self) -> int:
         """Return total number of indexed documents."""
@@ -244,6 +369,14 @@ class MetadataStore:
             chunk_ids,
         ).fetchall()
         return {row["id"]: ChunkRecord(**dict(row)) for row in rows}
+
+    def ping(self) -> bool:
+        """Return True if the database connection is healthy."""
+        try:
+            self.conn.execute("SELECT 1").fetchone()
+            return True
+        except Exception:
+            return False
 
     def close(self) -> None:
         """Close the database connection."""

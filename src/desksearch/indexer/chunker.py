@@ -1,12 +1,19 @@
-"""Text chunking with paragraph-aware splitting.
+"""Text chunking with sentence-aware splitting.
 
 Splits text into overlapping chunks of configurable size, preserving
-paragraph boundaries where possible. Each chunk includes metadata for
+sentence boundaries wherever possible. Each chunk includes metadata for
 tracing back to the source.
 """
+from __future__ import annotations
+
+import re
 from dataclasses import dataclass
 
 from desksearch.config import DEFAULT_CHUNK_OVERLAP, DEFAULT_CHUNK_SIZE
+
+# Sentence-boundary pattern: after a period/!/? + whitespace, before an upper-case or digit.
+# We also accept lower-case starts so we don't skip too many real boundaries.
+_SENT_END_RE = re.compile(r'(?<=[.!?])\s+')
 
 
 @dataclass
@@ -25,13 +32,20 @@ def chunk_text(
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     chunk_overlap: int = DEFAULT_CHUNK_OVERLAP,
 ) -> list[Chunk]:
-    """Split text into overlapping chunks, preserving paragraph boundaries.
+    """Split text into overlapping chunks, preserving sentence boundaries.
+
+    Unlike a plain character-split, this implementation:
+    * Never cuts the text mid-sentence when a sentence boundary exists
+      within ±100 chars of the target split point.
+    * Overlap is aligned to the nearest sentence start so the leading
+      context of each chunk is always a complete sentence.
 
     Args:
         text: The full text to chunk.
         source_file: Path to the source file (stored in metadata).
         chunk_size: Target chunk size in characters.
-        chunk_overlap: Number of overlapping characters between chunks.
+        chunk_overlap: Approximate number of overlapping characters between
+            adjacent chunks (snapped to a sentence boundary).
 
     Returns:
         List of Chunk objects with text and metadata.
@@ -56,8 +70,9 @@ def chunk_text(
                 chunk_index=len(chunks),
                 char_offset=chunk_start_offset,
             ))
-            # Compute overlap: take the tail of current_text
-            overlap_text = current_text[-chunk_overlap:] if chunk_overlap > 0 else ""
+            # Sentence-aware overlap: start the next chunk at a sentence
+            # boundary inside the tail of the current chunk.
+            overlap_text = _sentence_aware_tail(current_text, chunk_overlap)
             overlap_start = chunk_start_offset + len(current_text) - len(overlap_text)
             current_text = overlap_text
             chunk_start_offset = overlap_start
@@ -79,7 +94,9 @@ def chunk_text(
                 chunk_index=len(chunks),
                 char_offset=chunk_start_offset,
             ))
-            overlap_text = current_text[split_at - chunk_overlap:split_at] if chunk_overlap > 0 else ""
+            # Sentence-aware overlap for force-splits too
+            tail_for_overlap = current_text[:split_at]
+            overlap_text = _sentence_aware_tail(tail_for_overlap, chunk_overlap)
             current_text = overlap_text + current_text[split_at:]
             chunk_start_offset = chunk_start_offset + split_at - len(overlap_text)
 
@@ -93,6 +110,41 @@ def chunk_text(
         ))
 
     return chunks
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _sentence_aware_tail(text: str, max_chars: int) -> str:
+    """Return the tail of *text* that fits within *max_chars*, starting at
+    the first sentence boundary found inside that tail.
+
+    This ensures that the overlap leading into the next chunk always starts
+    at a sentence boundary rather than mid-word or mid-sentence.
+
+    If no sentence boundary is found inside the tail, the raw character tail
+    is returned (same behaviour as the old code).
+    """
+    if max_chars <= 0 or not text:
+        return ""
+
+    start = max(0, len(text) - max_chars)
+    tail = text[start:]
+
+    # Find the first sentence-end marker inside the tail; start next sentence
+    # after that marker (skip the trailing whitespace).
+    m = _SENT_END_RE.search(tail)
+    if m and m.end() < len(tail):
+        return tail[m.end():]
+
+    # No sentence boundary found; fall back to word boundary
+    space = tail.find(" ")
+    if space != -1 and space < len(tail) - 1:
+        return tail[space + 1:]
+
+    return tail
 
 
 def _split_paragraphs(text: str) -> list[tuple[int, str]]:
@@ -115,9 +167,9 @@ def _find_split_point(text: str, max_size: int) -> int:
     if max_size >= len(text):
         return len(text)
 
-    # Try to split at sentence boundary (., !, ?)
-    for i in range(max_size, max(max_size - 100, 0), -1):
-        if i < len(text) and text[i - 1] in ".!?" and (i >= len(text) or text[i] == " "):
+    # Try to split at sentence boundary (., !, ?) within 150 chars of max_size
+    for i in range(max_size, max(max_size - 150, 0), -1):
+        if i < len(text) and text[i - 1] in ".!?" and (i >= len(text) or text[i] in " \n"):
             return i
 
     # Try to split at word boundary

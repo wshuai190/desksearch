@@ -1,8 +1,9 @@
 """FastAPI application factory for DeskSearch."""
 import logging
+import time
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -15,6 +16,9 @@ from desksearch.indexer.store import MetadataStore
 from desksearch.utils.memory import log_memory, log_memory_delta
 
 logger = logging.getLogger(__name__)
+
+# Requests that take longer than this are logged as warnings.
+_SLOW_REQUEST_MS = 2000
 
 # Look for UI files: first in package (pip install), then in source tree (dev)
 _pkg_ui = Path(__file__).resolve().parent.parent / "ui_dist"
@@ -38,6 +42,12 @@ def create_app(
     """
     config = config or Config.load()
     config.data_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- Config validation ---
+    issues = config.validate()
+    for issue in issues:
+        logger.warning("Config issue: %s", issue)
+
     set_config(config)
 
     # Track whether components were pre-built (daemon mode) or created here
@@ -73,6 +83,30 @@ def create_app(
         description="Private semantic search engine for your local files",
         version="0.1.0",
     )
+
+    # --- Request timing middleware ---
+    @app.middleware("http")
+    async def timing_middleware(request: Request, call_next) -> Response:
+        """Record per-request latency and warn on slow requests."""
+        t0 = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        response.headers["X-Process-Time-Ms"] = f"{elapsed_ms:.1f}"
+        if elapsed_ms > _SLOW_REQUEST_MS:
+            logger.warning(
+                "Slow request: %s %s — %.0fms",
+                request.method,
+                request.url.path,
+                elapsed_ms,
+            )
+        else:
+            logger.debug(
+                "%s %s — %.1fms",
+                request.method,
+                request.url.path,
+                elapsed_ms,
+            )
+        return response
 
     # CORS — allow the dev Vite server and the bundled UI
     app.add_middleware(
@@ -135,6 +169,6 @@ def _warm_search_engine(engine, store, config) -> None:
     faiss_vecs = engine.dense.doc_count
     logger.info(
         "Index ready: %d documents, %d chunks in SQLite | "
-        "%d docs in BM25 | %d vectors in FAISS",
-        doc_count, chunk_count, bm25_docs, faiss_vecs,
+        "%d docs in BM25 | %d vectors in FAISS | mode=%s",
+        doc_count, chunk_count, bm25_docs, faiss_vecs, engine.mode,
     )
