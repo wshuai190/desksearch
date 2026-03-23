@@ -26,15 +26,43 @@
     background: #ccc;
     border-radius: 3px;
   }
+
+  /* Safe-area insets for notched iPhones */
+  :root {
+    --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  }
 }
 
 @layer components {
   .search-highlight {
     @apply bg-accent-blue/20 text-accent-blue font-medium rounded px-0.5;
   }
+
+  /* Bottom nav bar with safe-area support */
+  .bottom-nav {
+    padding-bottom: calc(0.5rem + var(--safe-area-inset-bottom));
+  }
+
+  /* Content padding to avoid bottom nav overlap on mobile */
+  .mobile-content-pb {
+    padding-bottom: calc(4.5rem + var(--safe-area-inset-bottom));
+  }
 }
 
 /* Override browser default <mark> yellow to use our themed highlight */
 mark {
   background: transparent;
+}
+
+/* Reset mobile content padding on desktop */
+@media (min-width: 640px) {
+  .mobile-content-pb {
+    padding-bottom: 0 !important;
+  }
+}
+
+/* Prevent pull-to-refresh on mobile when we handle it ourselves */
+html {
+  overscroll-behavior-y: contain;
 }

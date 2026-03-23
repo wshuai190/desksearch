@@ -62,6 +62,23 @@ class Config(BaseModel):
         default_factory=dict,
         description="Per-plugin configuration keyed by plugin name",
     )
+    # ---------------------------------------------------------------------------
+    # Integration settings (all optional — zero impact if not configured)
+    # ---------------------------------------------------------------------------
+    api_key: Optional[str] = Field(
+        default=None,
+        description="Bearer token for /api/v1/search and integration endpoints. "
+                    "If unset, those endpoints are open (no auth).",
+    )
+    slack_webhook_url: Optional[str] = Field(
+        default=None,
+        description="Incoming webhook URL for posting Slack notifications (optional).",
+    )
+    webhook_urls: list[str] = Field(
+        default_factory=list,
+        description="HTTP(S) URLs to POST to when indexing completes or new files are found.",
+    )
+
     excluded_dirs: list[str] = Field(
         default_factory=lambda: [
             ".git", "__pycache__", "node_modules", ".venv", "venv",

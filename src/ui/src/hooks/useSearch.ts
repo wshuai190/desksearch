@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
-import type { SearchResponse, SearchFilters } from '../types';
+import type { RichSearchResponse, SearchFilters } from '../types';
 
 export function useSearch(query: string, filters: SearchFilters) {
-  const [data, setData] = useState<SearchResponse | null>(null);
+  const [data, setData] = useState<RichSearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -23,7 +23,7 @@ export function useSearch(query: string, filters: SearchFilters) {
     setError(null);
 
     try {
-      const params = new URLSearchParams({ q: q.trim() });
+      const params = new URLSearchParams({ q: q.trim(), rich: 'true' });
       if (f.file_types.length > 0) {
         params.set('file_types', f.file_types.join(','));
       }
@@ -37,7 +37,7 @@ export function useSearch(query: string, filters: SearchFilters) {
 
       if (!res.ok) throw new Error(`Search failed: ${res.statusText}`);
 
-      const json: SearchResponse = await res.json();
+      const json: RichSearchResponse = await res.json();
       setData(json);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') return;

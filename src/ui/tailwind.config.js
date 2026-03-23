@@ -13,10 +13,15 @@ export default {
           '0%': { opacity: '0', transform: 'translateY(-8px)' },
           '100%': { opacity: '1', transform: 'translateY(0)' },
         },
+        slideInRight: {
+          '0%': { opacity: '0', transform: 'translateX(100%)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
       },
       animation: {
         fadeIn: 'fadeIn 0.2s ease-out forwards',
         slideDown: 'slideDown 0.15s ease-out forwards',
+        slideInRight: 'slideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards',
       },
       colors: {
         dark: {

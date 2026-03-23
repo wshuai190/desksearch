@@ -90,6 +90,113 @@ export interface SettingsData {
   file_extensions: string[];
   max_file_size_mb: number;
   excluded_dirs: string[];
+  // Integration fields
+  api_key?: string | null;
+  webhook_urls: string[];
+  slack_webhook_url?: string | null;
 }
 
-export type TabId = 'search' | 'dashboard' | 'files' | 'folders' | 'settings';
+export interface BrowserSyncResult {
+  status: string;
+  bookmarks_found: number;
+  bookmarks_indexed: number;
+  errors: number;
+  message?: string;
+}
+
+export interface EmailImportResult {
+  status: string;
+  filename: string;
+  emails_found: number;
+  emails_indexed: number;
+  errors: number;
+}
+
+export interface WebhookTestResult {
+  status: string;
+  url: string;
+  http_status: number;
+  delivered: boolean;
+}
+
+export type TabId = 'search' | 'dashboard' | 'files' | 'folders' | 'settings' | 'analytics' | 'topics' | 'duplicates';
+
+// --- Killer feature types ---
+
+export interface NLAnswer {
+  answer: string;
+  is_question: boolean;
+}
+
+export interface RelatedDoc {
+  doc_id: number;
+  similarity: number;
+  path: string;
+  filename: string;
+}
+
+export interface RichSearchResult extends SearchResult {
+  related_docs: RelatedDoc[];
+}
+
+export interface RichSearchResponse {
+  results: RichSearchResult[];
+  total: number;
+  query_time_ms: number;
+  answer?: NLAnswer;
+}
+
+export interface SuggestResponse {
+  suggestions: string[];
+  recent: string[];
+}
+
+export interface RichPreview {
+  doc_id: number;
+  path: string;
+  filename: string;
+  file_type: string;
+  preview_text: string;
+  key_phrases: string[];
+  size?: number;
+  modified?: string;
+  num_chunks: number;
+  word_count: number;
+}
+
+export interface AnalyticsSummary {
+  total_searches: number;
+  total_clicks: number;
+  top_searches: { query: string; count: number; avg_results: number }[];
+  top_files: { path: string; filename: string; clicks: number }[];
+  search_over_time: { date: string; count: number }[];
+}
+
+export interface TopicInfo {
+  id: number;
+  label: string;
+  doc_count: number;
+  doc_ids: number[];
+  doc_filenames: string[];
+  doc_paths: string[];
+}
+
+export interface CollectionsResponse {
+  topics: TopicInfo[];
+  total_docs_clustered: number;
+}
+
+export interface DuplicatePair {
+  doc_id_a: number;
+  doc_id_b: number;
+  similarity: number;
+  path_a: string;
+  path_b: string;
+  filename_a: string;
+  filename_b: string;
+}
+
+export interface DuplicatesResponse {
+  pairs: DuplicatePair[];
+  total: number;
+}

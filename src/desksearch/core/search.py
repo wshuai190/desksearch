@@ -14,6 +14,7 @@ Performance monitoring:
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import re
 import threading
@@ -24,6 +25,13 @@ from functools import partial
 from typing import Optional
 
 import numpy as np
+
+# Module-level thread pool for parallel BM25 + dense search.
+# 2 workers are enough (one per backend); daemon threads exit when the
+# process exits without needing explicit shutdown.
+_SEARCH_EXECUTOR: concurrent.futures.ThreadPoolExecutor = (
+    concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="ds-search")
+)
 
 from desksearch.config import Config
 from desksearch.core.bm25 import BM25Index
@@ -377,6 +385,12 @@ class HybridSearchEngine:
         if self._cache:
             self._cache.clear()
 
+    def save(self) -> None:
+        """Persist all indexes to disk."""
+        if self.dense and self.dense.available:
+            self.dense.save()
+        # BM25 (tantivy) auto-commits on write
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------
@@ -507,21 +521,36 @@ class HybridSearchEngine:
         # Expand the query for BM25 (synonym/variant expansion for short queries).
         bm25_query = _expand_query_for_bm25(query_norm) if mode in ("hybrid", "bm25_only") else query_norm
 
-        # Run available backends.
+        # Run available backends — in parallel when both are needed.
         bm25_results: list[tuple[str, float]] = []
         dense_results: list[tuple[str, float]] = []
 
-        if mode in ("hybrid", "bm25_only"):
+        need_bm25  = mode in ("hybrid", "bm25_only")
+        need_dense = mode in ("hybrid", "dense_only")
+
+        if need_bm25 and need_dense:
+            # Submit both to the executor and collect results concurrently.
+            ft_bm25  = _SEARCH_EXECUTOR.submit(self.bm25.search,  bm25_query,      top_k * 2)
+            ft_dense = _SEARCH_EXECUTOR.submit(self.dense.search, query_embedding, top_k * 2)
             try:
-                bm25_results = self.bm25.search(bm25_query, top_k=top_k * 2)
+                bm25_results = ft_bm25.result()
             except Exception as exc:
                 logger.error("BM25 search error: %s", exc, exc_info=True)
-
-        if mode in ("hybrid", "dense_only"):
             try:
-                dense_results = self.dense.search(query_embedding, top_k=top_k * 2)
+                dense_results = ft_dense.result()
             except Exception as exc:
                 logger.error("Dense search error: %s", exc, exc_info=True)
+        else:
+            if need_bm25:
+                try:
+                    bm25_results = self.bm25.search(bm25_query, top_k=top_k * 2)
+                except Exception as exc:
+                    logger.error("BM25 search error: %s", exc, exc_info=True)
+            if need_dense:
+                try:
+                    dense_results = self.dense.search(query_embedding, top_k=top_k * 2)
+                except Exception as exc:
+                    logger.error("Dense search error: %s", exc, exc_info=True)
 
         # Fuse results.
         fused = weighted_rrf(

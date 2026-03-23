@@ -8,6 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from desksearch.api.routes import router, ws_router, set_config, set_components
+from desksearch.api.integrations import (
+    integrations_router,
+    set_config as integrations_set_config,
+    set_components as integrations_set_components,
+)
 from desksearch.config import Config
 from desksearch.core.search import HybridSearchEngine
 from desksearch.indexer.embedder import Embedder
@@ -49,6 +54,7 @@ def create_app(
         logger.warning("Config issue: %s", issue)
 
     set_config(config)
+    integrations_set_config(config)
 
     # Track whether components were pre-built (daemon mode) or created here
     is_standalone = embedder is None
@@ -73,10 +79,17 @@ def create_app(
     # constructors, so this call only needs to do lightweight bookkeeping.
     if is_standalone:
         _warm_search_engine(engine, store, config)
+        # VACUUM SQLite in the background if fragmented — safe at startup
+        # because no writes are in-flight yet.
+        try:
+            store.vacuum_if_fragmented()
+        except Exception as _e:
+            logger.debug("VACUUM skipped: %s", _e)
 
     log_memory_delta(mem_before, "startup-after-warm")
 
     set_components(engine, pipeline, embedder, store)
+    integrations_set_components(engine, pipeline, embedder, store)
 
     app = FastAPI(
         title="DeskSearch",
@@ -124,6 +137,7 @@ def create_app(
     # API + WebSocket routes
     app.include_router(router)
     app.include_router(ws_router)
+    app.include_router(integrations_router)
 
     # Auto-index on startup if folders are configured but nothing is indexed
     @app.on_event("startup")

@@ -13,8 +13,14 @@ from __future__ import annotations
 
 import logging
 import threading
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
+
+# Maximum number of pre-parsed tantivy queries to keep in RAM.
+# parse_query is fast but not free; caching avoids re-parsing identical
+# queries on every search call (very common in paginated / repeat scenarios).
+_QUERY_CACHE_SIZE = 256
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +52,11 @@ class BM25Index:
         # Serialise write operations — tantivy's Python binding doesn't
         # guarantee thread-safety for concurrent writers.
         self._write_lock = threading.Lock()
+
+        # LRU cache for pre-parsed tantivy Query objects.
+        # Keyed on the raw query string; avoids re-parsing for repeated queries.
+        self._query_cache: OrderedDict[str, object] = OrderedDict()
+        self._query_cache_lock = threading.Lock()
 
         self.available: bool = _TANTIVY_AVAILABLE
         self._index: Optional[tantivy.Index] = None
@@ -100,6 +111,7 @@ class BM25Index:
                 self._index.reload()
             except Exception as exc:
                 logger.warning("BM25 reload failed after add_document: %s", exc)
+            self._invalidate_query_cache()
 
     def add_documents(self, docs: list[tuple[str, str]]) -> None:
         """Batch-add documents as (doc_id, body) pairs."""
@@ -123,6 +135,7 @@ class BM25Index:
                 self._index.reload()
             except Exception as exc:
                 logger.warning("BM25 reload failed after add_documents: %s", exc)
+            self._invalidate_query_cache()
 
     def delete_document(self, doc_id: str) -> None:
         """Remove a document by doc_id."""
@@ -144,6 +157,32 @@ class BM25Index:
                 self._index.reload()
             except Exception as exc:
                 logger.warning("BM25 reload failed after delete_document: %s", exc)
+            self._invalidate_query_cache()
+
+    # ------------------------------------------------------------------
+    # Query cache helpers
+    # ------------------------------------------------------------------
+
+    def _get_cached_query(self, query: str):
+        """Return a cached parsed tantivy Query, or None on cache miss."""
+        with self._query_cache_lock:
+            if query in self._query_cache:
+                self._query_cache.move_to_end(query)
+                return self._query_cache[query]
+        return None
+
+    def _put_cached_query(self, query: str, parsed) -> None:
+        """Store a parsed tantivy Query in the LRU cache."""
+        with self._query_cache_lock:
+            self._query_cache[query] = parsed
+            self._query_cache.move_to_end(query)
+            while len(self._query_cache) > _QUERY_CACHE_SIZE:
+                self._query_cache.popitem(last=False)
+
+    def _invalidate_query_cache(self) -> None:
+        """Clear the query cache after any index mutation (add/delete)."""
+        with self._query_cache_lock:
+            self._query_cache.clear()
 
     # ------------------------------------------------------------------
     # Search
@@ -153,6 +192,7 @@ class BM25Index:
         """Search the index, returning a list of (doc_id, score) tuples.
 
         Returns an empty list (rather than raising) on any error.
+        Parsed queries are cached in an LRU to avoid re-parsing identical strings.
         """
         if not self.available or self._index is None:
             return []
@@ -161,7 +201,10 @@ class BM25Index:
 
         try:
             searcher = self._index.searcher()
-            parsed_query = self._index.parse_query(query, ["body"])
+            parsed_query = self._get_cached_query(query)
+            if parsed_query is None:
+                parsed_query = self._index.parse_query(query, ["body"])
+                self._put_cached_query(query, parsed_query)
             results = searcher.search(parsed_query, top_k).hits
         except Exception as exc:
             logger.warning("BM25 search failed for query %r: %s", query, exc)

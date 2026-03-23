@@ -15,7 +15,11 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, HTTPExcept
 from desksearch.api.schemas import (
     ActivityEntry,
     ActivityResponse,
+    AnalyticsSummary,
+    CollectionsResponse,
     DashboardStats,
+    DuplicatePair,
+    DuplicatesResponse,
     ErrorResponse,
     FileInfo,
     FilePreview,
@@ -24,10 +28,16 @@ from desksearch.api.schemas import (
     FolderInfo,
     IndexRequest,
     IndexStatus,
+    NLAnswer,
+    RichPreview,
+    RichSearchResponse,
+    RichSearchResult,
     SearchResponse,
     SearchResult,
     SettingsResponse,
     SettingsUpdateRequest,
+    SuggestResponse,
+    TopicInfo,
 )
 from desksearch.config import Config
 
@@ -43,6 +53,13 @@ _search_engine = None  # HybridSearchEngine
 _pipeline = None  # IndexingPipeline
 _embedder = None  # Embedder
 _store = None  # MetadataStore
+_analytics = None  # AnalyticsStore
+
+# Cached document embeddings for related-doc and collection features
+_doc_embeddings: dict = {}
+_doc_paths: dict = {}
+_doc_filenames: dict = {}
+_doc_emb_loaded: bool = False
 
 
 def _warm_from_store() -> None:
@@ -85,11 +102,30 @@ def get_config() -> Config:
 
 def set_components(search_engine, pipeline, embedder, store) -> None:
     """Inject core components at startup."""
-    global _search_engine, _pipeline, _embedder, _store
+    global _search_engine, _pipeline, _embedder, _store, _analytics
+    from desksearch.core.analytics import AnalyticsStore
     _search_engine = search_engine
     _pipeline = pipeline
     _embedder = embedder
     _store = store
+    analytics_db = _config.data_dir / "analytics.db"
+    _analytics = AnalyticsStore(analytics_db)
+
+
+def _ensure_doc_embeddings() -> None:
+    """Load document-level embeddings (average chunk embeddings) into memory."""
+    global _doc_embeddings, _doc_paths, _doc_filenames, _doc_emb_loaded
+    if _doc_emb_loaded or _store is None:
+        return
+    try:
+        from desksearch.core.collections import build_doc_embeddings
+        emb_path = _config.data_dir / "embeddings"
+        _doc_embeddings, _doc_paths, _doc_filenames = build_doc_embeddings(_store, emb_path)
+        _doc_emb_loaded = True
+        logger.info("Loaded doc embeddings for %d documents", len(_doc_embeddings))
+    except Exception as exc:
+        logger.warning("Could not load doc embeddings: %s", exc)
+        _doc_emb_loaded = True  # don't retry on every request
 
 
 # ---------------------------------------------------------------------------
@@ -97,18 +133,19 @@ def set_components(search_engine, pipeline, embedder, store) -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/search", response_model=SearchResponse)
+@router.get("/search", response_model=RichSearchResponse)
 async def search(
     q: str = Query(..., min_length=1, description="Search query"),
     type: Optional[str] = Query(None, description="Filter by file type (e.g. pdf)"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
-) -> SearchResponse:
+    rich: bool = Query(True, description="Include NL answers and related docs"),
+) -> RichSearchResponse:
     """Execute a hybrid search query against the index."""
     start = time.perf_counter()
 
     if _search_engine is None or _embedder is None or _store is None:
         elapsed_ms = (time.perf_counter() - start) * 1000
-        return SearchResponse(results=[], total=0, query_time_ms=round(elapsed_ms, 2))
+        return RichSearchResponse(results=[], total=0, query_time_ms=round(elapsed_ms, 2))
 
     # Embed the query
     loop = asyncio.get_event_loop()
@@ -185,7 +222,19 @@ async def search(
     )
 
     # --- Build final API results ---
-    results: list[SearchResult] = []
+    # --- Load doc embeddings for related-doc feature (lazy, once) ---
+    if rich and not _doc_emb_loaded:
+        loop.run_in_executor(None, _ensure_doc_embeddings)
+
+    # --- NL answer extraction ---
+    from desksearch.core.nlsearch import is_question, extract_answer
+    nl_answer: Optional[NLAnswer] = None
+    query_is_question = is_question(q)
+
+    # Collect chunk texts for answer extraction (before building results list)
+    chunk_texts_for_answer: list[tuple[str, float]] = []
+
+    results: list[RichSearchResult] = []
     for r, chunk, doc in ranked:
         file_type = doc.extension.lstrip(".")
         if type and file_type != type:
@@ -195,7 +244,22 @@ async def search(
         snippet = r.snippets[0].highlighted if r.snippets else chunk.text[:200]
         modified = datetime.fromtimestamp(doc.modified_time, tz=timezone.utc)
 
-        results.append(SearchResult(
+        # Collect for NL answer
+        if query_is_question and len(chunk_texts_for_answer) < 5:
+            chunk_texts_for_answer.append((chunk.text, r.score))
+
+        # Related docs (using cached doc embeddings)
+        related: list[dict] = []
+        if rich and _doc_emb_loaded and _doc_embeddings:
+            try:
+                from desksearch.core.collections import find_related_docs
+                related = find_related_docs(
+                    doc.id, _doc_embeddings, _doc_paths, _doc_filenames, top_k=3
+                )
+            except Exception:
+                pass
+
+        results.append(RichSearchResult(
             doc_id=r.doc_id,
             path=doc.path,
             filename=doc.filename,
@@ -205,10 +269,20 @@ async def search(
             modified=modified,
             file_size=doc.size,
             other_chunk_count=extra_counts.get(doc.id, 0),
+            related_docs=related,
         ))
 
         if len(results) >= limit:
             break
+
+    # Extract NL answer if applicable
+    if query_is_question and chunk_texts_for_answer and rich:
+        try:
+            answer_text = extract_answer(q, chunk_texts_for_answer)
+            if answer_text:
+                nl_answer = NLAnswer(answer=answer_text, is_question=True)
+        except Exception as exc:
+            logger.debug("NL answer extraction failed: %s", exc)
 
     elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -219,10 +293,18 @@ async def search(
             elapsed_ms, q, len(results),
         )
 
-    return SearchResponse(
+    # Record search analytics (non-blocking, best-effort)
+    if _analytics:
+        try:
+            _analytics.record_search(q, result_count=len(results))
+        except Exception:
+            pass
+
+    return RichSearchResponse(
         results=results,
         total=len(results),
         query_time_ms=round(elapsed_ms, 2),
+        answer=nl_answer,
     )
 
 
@@ -418,6 +500,15 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
             logger.exception("Indexing failed")
         finally:
             _indexing = False
+            global _doc_emb_loaded
+            _doc_emb_loaded = False  # force reload of doc embeddings after re-index
+            # Persist FAISS index to disk so it survives restarts
+            if _engine:
+                try:
+                    _engine.save()
+                    logger.info("Search index saved to disk")
+                except Exception:
+                    logger.exception("Failed to save search index")
             await _broadcast_progress({"status": "complete"})
 
     asyncio.create_task(_run_index())
@@ -485,6 +576,9 @@ async def get_settings() -> SettingsResponse:
         file_extensions=_config.file_extensions,
         max_file_size_mb=_config.max_file_size_mb,
         excluded_dirs=_config.excluded_dirs,
+        api_key=_config.api_key,
+        webhook_urls=_config.webhook_urls,
+        slack_webhook_url=_config.slack_webhook_url,
     )
 
 
@@ -492,7 +586,8 @@ async def get_settings() -> SettingsResponse:
 async def update_settings(update: SettingsUpdateRequest) -> SettingsResponse:
     """Update configuration (partial update — only provided fields change)."""
     global _config
-    changes = update.model_dump(exclude_none=True)
+    # Use exclude_unset so explicit None values (clearing a field) pass through
+    changes = update.model_dump(exclude_unset=True)
     if not changes:
         raise HTTPException(status_code=400, detail="No fields provided to update")
 
@@ -500,13 +595,60 @@ async def update_settings(update: SettingsUpdateRequest) -> SettingsResponse:
     for key, value in changes.items():
         if key == "index_paths":
             config_data[key] = [Path(p) for p in value]
+        elif key in ("api_key", "slack_webhook_url") and value == "":
+            config_data[key] = None  # empty string → clear the field
         else:
             config_data[key] = value
 
     _config = Config(**config_data)
     _config.save()
 
+    # Keep integrations module in sync
+    try:
+        from desksearch.api.integrations import set_config as _int_set_config
+        _int_set_config(_config)
+    except Exception:
+        pass
+
     return await get_settings()
+
+
+@router.post("/v1/api-key/regenerate")
+async def regenerate_api_key() -> dict:
+    """Generate a new random API key and persist it to config."""
+    global _config
+    import secrets
+    new_key = f"ds-{secrets.token_urlsafe(32)}"
+    config_data = _config.model_dump()
+    config_data["api_key"] = new_key
+    _config = Config(**config_data)
+    _config.save()
+
+    try:
+        from desksearch.api.integrations import set_config as _int_set_config
+        _int_set_config(_config)
+    except Exception:
+        pass
+
+    return {"api_key": new_key}
+
+
+@router.delete("/v1/api-key")
+async def clear_api_key() -> dict:
+    """Remove the API key (disables bearer-token auth on integration endpoints)."""
+    global _config
+    config_data = _config.model_dump()
+    config_data["api_key"] = None
+    _config = Config(**config_data)
+    _config.save()
+
+    try:
+        from desksearch.api.integrations import set_config as _int_set_config
+        _int_set_config(_config)
+    except Exception:
+        pass
+
+    return {"status": "ok", "api_key": None}
 
 
 # ---------------------------------------------------------------------------
@@ -874,6 +1016,273 @@ async def activity(limit: int = Query(20, ge=1, le=100)) -> ActivityResponse:
 
 
 # ---------------------------------------------------------------------------
+# Autocomplete / Suggestions
+# ---------------------------------------------------------------------------
+
+
+@router.get("/suggest", response_model=SuggestResponse)
+async def suggest(
+    q: str = Query(..., min_length=1, description="Partial query for autocomplete"),
+    limit: int = Query(8, ge=1, le=20),
+) -> SuggestResponse:
+    """Return autocomplete suggestions for a partial query.
+
+    Combines recent searches + indexed document title matches.
+    """
+    if not q.strip():
+        return SuggestResponse()
+
+    suggestions: list[str] = []
+    recent: list[str] = []
+
+    # Recent searches matching the prefix
+    if _analytics:
+        try:
+            recent = _analytics.suggest_from_recent(q, limit=5)
+        except Exception:
+            pass
+
+    # Document title suggestions (filenames matching prefix)
+    title_suggestions: list[str] = []
+    if _store:
+        try:
+            q_lower = q.lower()
+            docs = _store.all_documents()
+            # Score by prefix match quality
+            scored: list[tuple[float, str]] = []
+            for doc in docs:
+                fname_lower = doc.filename.lower()
+                if fname_lower.startswith(q_lower):
+                    scored.append((2.0, doc.filename))
+                elif q_lower in fname_lower:
+                    scored.append((1.0, doc.filename))
+            scored.sort(reverse=True)
+            seen: set[str] = set()
+            for _, fname in scored:
+                fname_key = fname.lower()
+                if fname_key not in seen:
+                    title_suggestions.append(fname)
+                    seen.add(fname_key)
+                if len(title_suggestions) >= 5:
+                    break
+        except Exception:
+            pass
+
+    # Merge: recent searches first, then title completions
+    seen_lower: set[str] = set()
+    for s in recent + title_suggestions:
+        if s.lower() not in seen_lower:
+            suggestions.append(s)
+            seen_lower.add(s.lower())
+        if len(suggestions) >= limit:
+            break
+
+    return SuggestResponse(suggestions=suggestions, recent=recent)
+
+
+# ---------------------------------------------------------------------------
+# Rich Document Preview
+# ---------------------------------------------------------------------------
+
+
+@router.get("/preview/{doc_id}", response_model=RichPreview)
+async def rich_preview(doc_id: int) -> RichPreview:
+    """Return a rich preview of a document: text excerpt, key phrases, metadata."""
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Store not initialized")
+
+    doc = _store.get_document_by_id(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    chunks = _store.get_chunks(doc_id)
+    full_text = "\n".join(c.text for c in chunks)
+
+    # Preview: first 500 chars
+    preview_text = full_text[:500]
+    if len(full_text) > 500:
+        # Try to cut at a sentence boundary
+        cut = full_text[:500].rfind(". ")
+        if cut > 200:
+            preview_text = full_text[:cut + 1]
+        else:
+            preview_text = full_text[:500] + "…"
+
+    # Key phrase extraction
+    from desksearch.core.nlsearch import extract_key_phrases
+    key_phrases = extract_key_phrases(full_text, max_phrases=8)
+
+    # Word count estimate
+    word_count = len(full_text.split())
+
+    modified = datetime.fromtimestamp(doc.modified_time, tz=timezone.utc)
+
+    return RichPreview(
+        doc_id=doc.id,
+        path=doc.path,
+        filename=doc.filename,
+        file_type=doc.extension.lstrip("."),
+        preview_text=preview_text,
+        key_phrases=key_phrases,
+        size=doc.size,
+        modified=modified,
+        num_chunks=doc.num_chunks,
+        word_count=word_count,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Analytics
+# ---------------------------------------------------------------------------
+
+
+@router.get("/analytics", response_model=AnalyticsSummary)
+async def analytics_summary(days: int = Query(30, ge=1, le=365)) -> AnalyticsSummary:
+    """Return search analytics: top queries, popular files, search frequency."""
+    if _analytics is None:
+        return AnalyticsSummary()
+
+    return AnalyticsSummary(
+        total_searches=_analytics.total_searches(),
+        total_clicks=_analytics.total_clicks(),
+        top_searches=_analytics.top_searches(limit=10, days=days),
+        top_files=_analytics.top_clicked_files(limit=10, days=days),
+        search_over_time=_analytics.search_frequency_over_time(days=days),
+    )
+
+
+@router.post("/analytics/click")
+async def track_click(body: dict) -> dict:
+    """Track a click on a search result."""
+    query = body.get("query", "")
+    doc_path = body.get("path", "")
+    doc_filename = body.get("filename", "")
+
+    if _analytics and query and doc_path:
+        try:
+            _analytics.record_click(query, doc_path, doc_filename)
+        except Exception:
+            pass
+
+    return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Smart Collections (topic clustering)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/collections", response_model=CollectionsResponse)
+async def get_collections(
+    n_topics: Optional[int] = Query(None, ge=2, le=20, description="Number of topics (auto if not set)"),
+) -> CollectionsResponse:
+    """Auto-cluster documents into topic collections using k-means on embeddings."""
+    if _store is None:
+        return CollectionsResponse()
+
+    # Load doc embeddings
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _ensure_doc_embeddings)
+
+    if not _doc_embeddings:
+        return CollectionsResponse()
+
+    try:
+        from desksearch.core.collections import cluster_documents
+        topics = await loop.run_in_executor(
+            None,
+            cluster_documents,
+            _doc_embeddings, _doc_paths, _doc_filenames, n_topics,
+        )
+    except Exception as exc:
+        logger.error("Clustering failed: %s", exc)
+        return CollectionsResponse()
+
+    topic_infos = [
+        TopicInfo(
+            id=t.id,
+            label=t.label,
+            doc_count=len(t.doc_ids),
+            doc_ids=t.doc_ids,
+            doc_filenames=t.doc_filenames,
+            doc_paths=t.doc_paths,
+        )
+        for t in topics
+    ]
+
+    total = sum(len(t.doc_ids) for t in topics)
+    return CollectionsResponse(topics=topic_infos, total_docs_clustered=total)
+
+
+# ---------------------------------------------------------------------------
+# Duplicate File Detection
+# ---------------------------------------------------------------------------
+
+
+@router.get("/duplicates", response_model=DuplicatesResponse)
+async def find_duplicates_endpoint(
+    threshold: float = Query(0.92, ge=0.5, le=0.9999, description="Similarity threshold"),
+) -> DuplicatesResponse:
+    """Find documents with very similar content (potential duplicates)."""
+    if _store is None:
+        return DuplicatesResponse()
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _ensure_doc_embeddings)
+
+    if not _doc_embeddings:
+        return DuplicatesResponse()
+
+    try:
+        from desksearch.core.collections import find_duplicates
+        pairs_raw = await loop.run_in_executor(
+            None,
+            find_duplicates,
+            _doc_embeddings, _doc_paths, _doc_filenames, threshold,
+        )
+    except Exception as exc:
+        logger.error("Duplicate detection failed: %s", exc)
+        return DuplicatesResponse()
+
+    pairs = [DuplicatePair(**p) for p in pairs_raw]
+    return DuplicatesResponse(pairs=pairs, total=len(pairs))
+
+
+# ---------------------------------------------------------------------------
+# Related Documents
+# ---------------------------------------------------------------------------
+
+
+@router.get("/related/{doc_id}")
+async def get_related_docs(
+    doc_id: int,
+    top_k: int = Query(5, ge=1, le=20),
+) -> dict:
+    """Find documents semantically similar to a given document."""
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Store not initialized")
+
+    doc = _store.get_document_by_id(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, _ensure_doc_embeddings)
+
+    if not _doc_embeddings:
+        return {"related": [], "doc_id": doc_id}
+
+    try:
+        from desksearch.core.collections import find_related_docs
+        related = find_related_docs(doc_id, _doc_embeddings, _doc_paths, _doc_filenames, top_k=top_k)
+    except Exception as exc:
+        logger.error("Related docs failed: %s", exc)
+        related = []
+
+    return {"related": related, "doc_id": doc_id, "filename": doc.filename}
+
+
+# ---------------------------------------------------------------------------
 # Open file
 # ---------------------------------------------------------------------------
 
@@ -937,6 +1346,20 @@ async def _broadcast_progress(data: dict) -> None:
             dead.append(ws)
     for ws in dead:
         _index_progress_subscribers.remove(ws)
+
+    # Fire webhook notifications when indexing finishes
+    if data.get("status") == "complete":
+        try:
+            from desksearch.api.integrations import notify_webhooks
+            doc_count = _store.document_count() if _store else 0
+            asyncio.create_task(
+                notify_webhooks(
+                    "indexing_complete",
+                    {"total_documents": doc_count},
+                )
+            )
+        except Exception:
+            pass  # Webhooks are optional — never block core functionality
 
 
 # ---------------------------------------------------------------------------

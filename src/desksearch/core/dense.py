@@ -1,9 +1,15 @@
 """Dense vector index using FAISS for cosine-similarity search.
 
-Supports two index types:
-- IndexFlatIP for small collections (<50k vectors): exact search, simple.
-- IndexIVFFlat for large collections (>=50k vectors): clustered search, lower memory.
-Also supports memory-mapped indexes for reduced RSS.
+Supports three index types, auto-selected by corpus size:
+- IndexFlatIP  for small collections (<HNSW_THRESHOLD vectors): exact search, simple.
+- IndexHNSWFlat for medium collections (HNSW_THRESHOLD–IVF_THRESHOLD): ANN,
+  no training, fast search, good recall.
+- IndexIVFFlat for large collections (>IVF_THRESHOLD): clustered search, lower memory.
+
+Soft deletion is used for HNSW (remove_ids is not supported there); the mapping
+layer tracks live doc_ids so deleted docs are silently filtered from results.
+
+Also supports memory-mapped indexes (faiss.IO_FLAG_MMAP) for reduced RSS.
 
 Thread-safety: a ``threading.Lock`` serialises all FAISS operations.
 FAISS does not guarantee thread safety on its own; the lock ensures that
@@ -17,13 +23,26 @@ can check ``self.available`` to know whether the index loaded successfully.
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
+
+# orjson is ~3x faster than stdlib json for serialising the id_mapping dict.
+try:
+    import orjson as _json_lib
+    def _json_loads(s: str | bytes) -> dict:
+        return _json_lib.loads(s)
+    def _json_dumps(obj) -> bytes:
+        return _json_lib.dumps(obj)
+except ImportError:
+    import json as _json_lib  # type: ignore
+    def _json_loads(s) -> dict:
+        return _json_lib.loads(s)
+    def _json_dumps(obj) -> bytes:
+        return _json_lib.dumps(obj).encode()
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +57,22 @@ except ImportError as exc:  # pragma: no cover
         "Install with: pip install faiss-cpu"
     )
 
-# Threshold for switching from flat to IVF index.
-IVF_THRESHOLD = 50_000
-# Number of Voronoi cells for IVF (sqrt of expected dataset size is a good rule).
-IVF_NLIST = 256
-# Number of cells to probe at search time (higher = better recall, slower).
-IVF_NPROBE = 16
+# ── Index-type thresholds ────────────────────────────────────────────────────
+# Flat  →  <HNSW_THRESHOLD  : exact, fast for small corpora
+# HNSW  →  HNSW_THRESHOLD..IVF_THRESHOLD : ANN, no training, good recall
+# IVF   →  >IVF_THRESHOLD   : clustered ANN, best for very large corpora
+
+HNSW_THRESHOLD = 1_000    # upgrade Flat → HNSW when ntotal exceeds this
+IVF_THRESHOLD  = 50_000   # upgrade HNSW → IVF  when ntotal exceeds this
+
+# HNSW parameters
+HNSW_M            = 32    # neighbours per node (higher = better recall/slower build)
+HNSW_EF_CONSTRUCT = 200   # build-time beam width
+HNSW_EF_SEARCH    = 50    # search-time beam width
+
+# IVF parameters
+IVF_NLIST  = 256   # Voronoi cells
+IVF_NPROBE = 16    # cells to probe at search time
 
 
 class DenseIndex:
@@ -52,9 +81,15 @@ class DenseIndex:
     Stores float32 embeddings and maps integer FAISS ids to string doc_ids.
     Persists both the FAISS index and the id mapping to disk.
 
-    For collections >= IVF_THRESHOLD vectors the index is automatically
-    built as an IVF index (IndexIVFFlat) which clusters vectors and only
-    searches relevant clusters — much less memory for large collections.
+    Index type is chosen automatically:
+    - ntotal < HNSW_THRESHOLD : IndexFlatIP  (exact)
+    - HNSW_THRESHOLD ≤ ntotal < IVF_THRESHOLD : IndexHNSWFlat (ANN, no training)
+    - ntotal ≥ IVF_THRESHOLD  : IndexIVFFlat (clustered ANN)
+
+    Soft deletion is used when the inner index does not support ``remove_ids``
+    (e.g. HNSW).  Logically-deleted vectors stay in FAISS but are filtered
+    from all search results and the ``doc_count`` property.  Call
+    ``maybe_rebuild_index()`` to reclaim their memory.
     """
 
     def __init__(
@@ -76,6 +111,9 @@ class DenseIndex:
         self._doc_id_to_int: dict[str, int] = {}
         self._int_to_doc_id: dict[int, str] = {}
         self._next_id: int = 0
+
+        # Soft-deleted int IDs (used when inner index doesn't support remove_ids)
+        self._soft_deleted: set[int] = set()
 
         # Serialise all FAISS operations to prevent race conditions.
         self._lock = threading.Lock()
@@ -104,11 +142,13 @@ class DenseIndex:
                     index = faiss.read_index(str(self._index_path))
                     logger.info("Loaded dense index with %d vectors", index.ntotal)
 
-                with open(self._mapping_path) as f:
-                    mapping = json.load(f)
+                with open(self._mapping_path, "rb") as f:
+                    mapping = _json_loads(f.read())
                 self._doc_id_to_int = {k: int(v) for k, v in mapping["doc_to_int"].items()}
                 self._int_to_doc_id = {int(k): v for k, v in mapping["int_to_doc"].items()}
                 self._next_id = mapping.get("next_id", len(self._doc_id_to_int))
+                # Restore soft-deleted set (int ids present in FAISS but not in mapping)
+                self._soft_deleted = set()
                 return index
             except Exception as exc:
                 logger.warning(
@@ -126,10 +166,30 @@ class DenseIndex:
 
         return self._create_flat_index()
 
+    # ------------------------------------------------------------------
+    # Index factory methods
+    # ------------------------------------------------------------------
+
     def _create_flat_index(self) -> faiss.IndexIDMap:
         """Create a new flat (exact) inner-product index."""
         inner = faiss.IndexFlatIP(self._dimension)
         return faiss.IndexIDMap(inner)
+
+    def _create_hnsw_index(self) -> faiss.IndexIDMap:
+        """Create an HNSW index (no training, good for 1k-100k vectors).
+
+        HNSW does not support ``remove_ids``, so we use soft deletion.
+        """
+        hnsw = faiss.IndexHNSWFlat(self._dimension, HNSW_M)
+        hnsw.hnsw.efConstruction = HNSW_EF_CONSTRUCT
+        hnsw.hnsw.efSearch = HNSW_EF_SEARCH
+        # IndexIDMap wraps it for explicit ID management
+        index = faiss.IndexIDMap(hnsw)
+        logger.info(
+            "Created HNSW index (M=%d, efConstruction=%d, efSearch=%d)",
+            HNSW_M, HNSW_EF_CONSTRUCT, HNSW_EF_SEARCH,
+        )
+        return index
 
     def _create_ivf_index(self, training_vectors: np.ndarray) -> faiss.IndexIDMap:
         """Create an IVF index trained on the given vectors."""
@@ -142,53 +202,133 @@ class DenseIndex:
         logger.info("Created IVF index with nlist=%d, nprobe=%d", nlist, IVF_NPROBE)
         return index
 
-    def maybe_rebuild_ivf(self) -> bool:
-        """Rebuild the index as IVF if it has grown past the threshold.
+    # ------------------------------------------------------------------
+    # Index-type helpers
+    # ------------------------------------------------------------------
 
+    def _inner_index(self) -> Optional[faiss.Index]:
+        """Return the unwrapped (inner) index from the IDMap wrapper."""
+        if self._index is None:
+            return None
+        return getattr(self._index, "index", self._index)
+
+    def _supports_remove_ids(self) -> bool:
+        """Return True if the current inner index supports remove_ids."""
+        inner = self._inner_index()
+        if inner is None:
+            return False
+        # HNSW does NOT support remove_ids.
+        return not isinstance(inner, faiss.IndexHNSWFlat)
+
+    # ------------------------------------------------------------------
+    # Auto-upgrade
+    # ------------------------------------------------------------------
+
+    def maybe_upgrade_index(self) -> bool:
+        """Upgrade the index type if the corpus has grown past a threshold.
+
+        - Flat → HNSW when live count ≥ HNSW_THRESHOLD
+        - HNSW → IVF  when live count ≥ IVF_THRESHOLD
+
+        Returns True if an upgrade happened.  Must be called *outside* any
+        held ``_lock`` — it acquires the lock internally.
+        """
+        if not self.available or self._index is None:
+            return False
+
+        live_count = len(self._doc_id_to_int)
+
+        if live_count >= IVF_THRESHOLD:
+            target = "ivf"
+        elif live_count >= HNSW_THRESHOLD:
+            target = "hnsw"
+        else:
+            return False  # Flat is still appropriate
+
+        inner = self._inner_index()
+        if target == "ivf" and isinstance(inner, faiss.IndexIVFFlat):
+            return False  # Already IVF
+        if target == "hnsw" and isinstance(inner, faiss.IndexHNSWFlat):
+            return False  # Already HNSW
+
+        with self._lock:
+            # Re-check under lock (another thread may have upgraded first)
+            inner = self._inner_index()
+            if target == "ivf" and isinstance(inner, faiss.IndexIVFFlat):
+                return False
+            if target == "hnsw" and isinstance(inner, faiss.IndexHNSWFlat):
+                return False
+
+            logger.info(
+                "Index has %d live vectors, upgrading to %s",
+                live_count, target.upper(),
+            )
+
+            all_vecs, all_ids = self._reconstruct_live_locked()
+            if all_vecs is None or len(all_vecs) == 0:
+                return False
+
+            if target == "ivf":
+                new_index = self._create_ivf_index(all_vecs)
+            else:
+                new_index = self._create_hnsw_index()
+
+            new_index.add_with_ids(self._normalize(all_vecs), all_ids)
+            self._index = new_index
+            self._soft_deleted.clear()
+            self._save_locked()
+            return True
+
+    # Legacy alias so external code that calls maybe_rebuild_ivf still works.
+    def maybe_rebuild_ivf(self) -> bool:  # noqa: D401
+        """Alias for ``maybe_upgrade_index`` (backwards compatibility)."""
+        return self.maybe_upgrade_index()
+
+    # ------------------------------------------------------------------
+    # Rebuild (compact soft-deleted slots)
+    # ------------------------------------------------------------------
+
+    def maybe_rebuild_index(self) -> bool:
+        """Compact the index by removing soft-deleted vectors.
+
+        Safe to call periodically to reclaim memory used by deleted docs.
         Returns True if a rebuild happened.
         """
         if not self.available or self._index is None:
             return False
-        with self._lock:
-            if self._index.ntotal < IVF_THRESHOLD:
-                return False
 
-            # Check if already IVF (unwrap IndexIDMap to inspect inner index)
-            inner = faiss.downcast_index(self._index.index) if hasattr(self._index, 'index') else self._index
-            if isinstance(inner, faiss.IndexIVFFlat):
+        with self._lock:
+            if not self._soft_deleted:
                 return False
 
             logger.info(
-                "Index has %d vectors (>= %d threshold), rebuilding as IVF",
-                self._index.ntotal, IVF_THRESHOLD,
+                "Rebuilding dense index to remove %d soft-deleted vectors",
+                len(self._soft_deleted),
             )
+            all_vecs, all_ids = self._reconstruct_live_locked()
+            if all_vecs is None or len(all_vecs) == 0:
+                self._index = self._create_flat_index()
+                self._soft_deleted.clear()
+                self._save_locked()
+                return True
 
-            # Extract all vectors and ids
-            all_vectors = self._reconstruct_all_locked()
-            if all_vectors is None or len(all_vectors) == 0:
-                return False
+            inner = self._inner_index()
+            if isinstance(inner, faiss.IndexIVFFlat):
+                new_index = self._create_ivf_index(all_vecs)
+            elif isinstance(inner, faiss.IndexHNSWFlat):
+                new_index = self._create_hnsw_index()
+            else:
+                new_index = self._create_flat_index()
 
-            int_ids = np.array(list(self._int_to_doc_id.keys()), dtype=np.int64)
-            new_index = self._create_ivf_index(all_vectors)
-            new_index.add_with_ids(self._normalize(all_vectors), int_ids)
+            new_index.add_with_ids(self._normalize(all_vecs), all_ids)
             self._index = new_index
+            self._soft_deleted.clear()
             self._save_locked()
             return True
 
-    def _reconstruct_all_locked(self) -> Optional[np.ndarray]:
-        """Reconstruct all vectors — must be called while ``_lock`` is held."""
-        n = self._index.ntotal
-        if n == 0:
-            return None
-        try:
-            vectors = np.zeros((n, self._dimension), dtype=np.float32)
-            int_ids = sorted(self._int_to_doc_id.keys())
-            for i, int_id in enumerate(int_ids):
-                vectors[i] = self._index.reconstruct(int_id)
-            return vectors
-        except Exception:
-            logger.warning("Could not reconstruct vectors for IVF rebuild")
-            return None
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
 
     def save(self) -> None:
         """Persist the FAISS index and id mapping to disk."""
@@ -206,8 +346,8 @@ class DenseIndex:
                 "int_to_doc": {str(k): v for k, v in self._int_to_doc_id.items()},
                 "next_id": self._next_id,
             }
-            with open(self._mapping_path, "w") as f:
-                json.dump(mapping, f)
+            with open(self._mapping_path, "wb") as f:
+                f.write(_json_dumps(mapping))
         except Exception as exc:
             logger.error("Failed to persist FAISS index: %s", exc, exc_info=True)
 
@@ -233,17 +373,14 @@ class DenseIndex:
 
         with self._lock:
             # Remove existing entries for these doc_ids
-            ids_to_remove = []
             for doc_id, _ in items:
                 if doc_id in self._doc_id_to_int:
-                    ids_to_remove.append(self._doc_id_to_int[doc_id])
-
-            if ids_to_remove:
-                self._index.remove_ids(np.array(ids_to_remove, dtype=np.int64))
-                for int_id in ids_to_remove:
-                    old_doc_id = self._int_to_doc_id.pop(int_id, None)
-                    if old_doc_id:
-                        self._doc_id_to_int.pop(old_doc_id, None)
+                    old_int_id = self._doc_id_to_int.pop(doc_id)
+                    self._int_to_doc_id.pop(old_int_id, None)
+                    if self._supports_remove_ids():
+                        self._index.remove_ids(np.array([old_int_id], dtype=np.int64))
+                    else:
+                        self._soft_deleted.add(old_int_id)
 
             # Build new vectors and ids
             vectors = np.array([emb for _, emb in items], dtype=np.float32)
@@ -261,6 +398,10 @@ class DenseIndex:
             self._index.add_with_ids(vectors, id_array)
             self._save_locked()
 
+        # Auto-upgrade index type if corpus crossed a threshold.
+        # Done outside the lock to avoid deadlock (maybe_upgrade_index takes lock).
+        self.maybe_upgrade_index()
+
     def delete(self, doc_id: str) -> None:
         """Remove a document from the index."""
         if not self.available or self._index is None:
@@ -270,7 +411,11 @@ class DenseIndex:
             if int_id is None:
                 return
             self._int_to_doc_id.pop(int_id, None)
-            self._index.remove_ids(np.array([int_id], dtype=np.int64))
+            if self._supports_remove_ids():
+                self._index.remove_ids(np.array([int_id], dtype=np.int64))
+            else:
+                # Soft-delete: keep vector in FAISS, filter at search time.
+                self._soft_deleted.add(int_id)
             self._save_locked()
 
     # ------------------------------------------------------------------
@@ -282,6 +427,7 @@ class DenseIndex:
 
         Returns an empty list (rather than raising) if the index is
         unavailable or empty.  Scores are cosine similarities in [-1, 1].
+        Soft-deleted vectors are silently filtered from results.
         """
         if not self.available or self._index is None:
             return []
@@ -293,7 +439,9 @@ class DenseIndex:
             query = np.array([query_embedding], dtype=np.float32)
             query = self._normalize(query)
 
-            k = min(top_k, self._index.ntotal)
+            # Fetch extra candidates to compensate for soft-deleted slots.
+            extra = len(self._soft_deleted)
+            k = min(top_k + extra, self._index.ntotal)
             try:
                 scores, ids = self._index.search(query, k)
             except Exception as exc:
@@ -304,25 +452,72 @@ class DenseIndex:
             for score, int_id in zip(scores[0], ids[0]):
                 if int_id == -1:
                     continue
+                if int_id in self._soft_deleted:
+                    continue
                 doc_id = self._int_to_doc_id.get(int(int_id))
                 if doc_id is not None:
                     results.append((doc_id, float(score)))
+                    if len(results) >= top_k:
+                        break
 
         return results
 
+    # ------------------------------------------------------------------
+    # Reconstruction helper (for index rebuild)
+    # ------------------------------------------------------------------
+
+    def _reconstruct_all_locked(self) -> Optional[np.ndarray]:
+        """Reconstruct all vectors (including soft-deleted) — lock must be held."""
+        n = self._index.ntotal
+        if n == 0:
+            return None
+        try:
+            vectors = np.zeros((n, self._dimension), dtype=np.float32)
+            int_ids = sorted(self._int_to_doc_id.keys())
+            for i, int_id in enumerate(int_ids):
+                vectors[i] = self._index.reconstruct(int_id)
+            return vectors
+        except Exception:
+            logger.warning("Could not reconstruct vectors for index rebuild")
+            return None
+
+    def _reconstruct_live_locked(self) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        """Reconstruct only live (non-deleted) vectors — lock must be held.
+
+        Returns (vectors, int_ids_array) or (None, None) on failure.
+        """
+        live_ids = sorted(k for k in self._int_to_doc_id if k not in self._soft_deleted)
+        if not live_ids:
+            return None, None
+        try:
+            vectors = np.zeros((len(live_ids), self._dimension), dtype=np.float32)
+            for i, int_id in enumerate(live_ids):
+                vectors[i] = self._index.reconstruct(int_id)
+            return vectors, np.array(live_ids, dtype=np.int64)
+        except Exception:
+            logger.warning("Could not reconstruct live vectors for index rebuild")
+            return None, None
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
     @property
     def doc_count(self) -> int:
-        """Number of vectors in the index."""
+        """Number of live (non-deleted) documents in the index."""
         if not self.available or self._index is None:
             return 0
-        return self._index.ntotal
+        # Use mapping size — excludes soft-deleted slots.
+        return len(self._doc_id_to_int)
 
     @property
     def index_type(self) -> str:
         """Return a human-readable description of the current index type."""
         if not self.available or self._index is None:
             return "unavailable"
-        inner = getattr(self._index, 'index', self._index)
+        inner = self._inner_index()
         if isinstance(inner, faiss.IndexIVFFlat):
             return f"IVF (nlist={inner.nlist}, nprobe={inner.nprobe})"
+        if isinstance(inner, faiss.IndexHNSWFlat):
+            return f"HNSW (M={inner.hnsw.nb_neighbors(0)}, efSearch={inner.hnsw.efSearch})"
         return "Flat (exact)"

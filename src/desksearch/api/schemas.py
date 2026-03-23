@@ -81,6 +81,10 @@ class SettingsResponse(BaseModel):
     file_extensions: list[str]
     max_file_size_mb: int
     excluded_dirs: list[str]
+    # Integration fields (optional — None when not configured)
+    api_key: Optional[str] = None
+    webhook_urls: list[str] = Field(default_factory=list)
+    slack_webhook_url: Optional[str] = None
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -92,6 +96,10 @@ class SettingsUpdateRequest(BaseModel):
     file_extensions: Optional[list[str]] = None
     max_file_size_mb: Optional[int] = Field(default=None, ge=1, le=1024)
     excluded_dirs: Optional[list[str]] = None
+    # Integration fields
+    api_key: Optional[str] = None          # empty string clears the key
+    webhook_urls: Optional[list[str]] = None
+    slack_webhook_url: Optional[str] = None  # empty string clears
 
 
 class FolderInfo(BaseModel):
@@ -172,3 +180,88 @@ class ErrorResponse(BaseModel):
     """Standard error response."""
 
     detail: str
+
+
+# ---------------------------------------------------------------------------
+# New killer feature schemas
+# ---------------------------------------------------------------------------
+
+class NLAnswer(BaseModel):
+    """Extractive answer for a natural language question."""
+    answer: str
+    is_question: bool = True
+
+
+class SuggestResponse(BaseModel):
+    """Autocomplete suggestions for a partial query."""
+    suggestions: list[str] = Field(default_factory=list)
+    recent: list[str] = Field(default_factory=list)
+
+
+class RichSearchResult(SearchResult):
+    """Extended search result with related docs."""
+    related_docs: list[dict] = Field(default_factory=list)
+
+
+class RichSearchResponse(BaseModel):
+    """Search response with optional NL answer and rich results."""
+    results: list[RichSearchResult] = Field(default_factory=list)
+    total: int = Field(default=0)
+    query_time_ms: float = Field(default=0.0)
+    answer: Optional[NLAnswer] = Field(default=None)
+
+
+class RichPreview(BaseModel):
+    """Rich document preview with key phrases and metadata."""
+    doc_id: int
+    path: str
+    filename: str
+    file_type: str
+    preview_text: str
+    key_phrases: list[str] = Field(default_factory=list)
+    size: Optional[int] = None
+    modified: Optional[datetime] = None
+    num_chunks: int = 0
+    word_count: int = 0
+
+
+class AnalyticsSummary(BaseModel):
+    """Search analytics summary."""
+    total_searches: int = 0
+    total_clicks: int = 0
+    top_searches: list[dict] = Field(default_factory=list)
+    top_files: list[dict] = Field(default_factory=list)
+    search_over_time: list[dict] = Field(default_factory=list)
+
+
+class TopicInfo(BaseModel):
+    """A topic / smart collection."""
+    id: int
+    label: str
+    doc_count: int
+    doc_ids: list[int] = Field(default_factory=list)
+    doc_filenames: list[str] = Field(default_factory=list)
+    doc_paths: list[str] = Field(default_factory=list)
+
+
+class CollectionsResponse(BaseModel):
+    """Smart document collections."""
+    topics: list[TopicInfo] = Field(default_factory=list)
+    total_docs_clustered: int = 0
+
+
+class DuplicatePair(BaseModel):
+    """A pair of potentially duplicate documents."""
+    doc_id_a: int
+    doc_id_b: int
+    similarity: float
+    path_a: str
+    path_b: str
+    filename_a: str
+    filename_b: str
+
+
+class DuplicatesResponse(BaseModel):
+    """Duplicate file detection results."""
+    pairs: list[DuplicatePair] = Field(default_factory=list)
+    total: int = 0
