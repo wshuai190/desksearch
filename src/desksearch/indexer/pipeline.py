@@ -26,7 +26,7 @@ from desksearch.config import Config
 from desksearch.indexer.chunker import chunk_text
 from desksearch.indexer.embedder import Embedder
 from desksearch.indexer.parsers import parse_file
-from desksearch.indexer.store import MetadataStore
+from desksearch.indexer.store import MetadataStore, compute_file_hash
 from desksearch.utils.memory import log_memory, log_memory_delta
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ BATCH_EMBED_SIZE = 256
 # Number of parallel file-parse workers.
 # Parsing is I/O + CPU bound; 4 threads saturates disk while leaving cores
 # for ONNX.  Keep it ≤ physical cores / 2 to avoid competing with ONNX GEMM.
-PARSE_WORKERS = 4
+PARSE_WORKERS = 6
 
 # How many parse futures to keep in flight ahead of the embed cursor.
 # Larger = better parse/embed overlap, more peak RAM for pending text.
@@ -80,6 +80,9 @@ class _PendingFile:
     path: Path
     chunks: list  # list of Chunk dataclass instances
     chunk_texts: list[str] = field(default_factory=list)
+    content_hash: str = ""
+    parse_ms: float = 0.0
+    chunk_ms: float = 0.0
 
 
 def _parse_and_chunk_file(
@@ -92,6 +95,7 @@ def _parse_and_chunk_file(
     Returns (_PendingFile, None) on success or (None, error_message) on failure.
     Thread-safe: uses only read-only shared state (_PARSERS registry).
     """
+    t0 = time.perf_counter()
     try:
         text = parse_file(file_path)
     except Exception as exc:  # noqa: BLE001
@@ -99,7 +103,9 @@ def _parse_and_chunk_file(
 
     if text is None:
         return None, "parse_failed"
+    parse_ms = (time.perf_counter() - t0) * 1000
 
+    t1 = time.perf_counter()
     try:
         chunks = chunk_text(
             text,
@@ -112,9 +118,19 @@ def _parse_and_chunk_file(
 
     if not chunks:
         return None, "no_chunks"
+    chunk_ms = (time.perf_counter() - t1) * 1000
+
+    # Compute content hash for skip-on-reindex optimisation
+    try:
+        content_hash = compute_file_hash(file_path)
+    except OSError:
+        content_hash = ""
 
     chunk_texts = [c.text for c in chunks]
-    return _PendingFile(path=file_path, chunks=chunks, chunk_texts=chunk_texts), None
+    return _PendingFile(
+        path=file_path, chunks=chunks, chunk_texts=chunk_texts,
+        content_hash=content_hash, parse_ms=parse_ms, chunk_ms=chunk_ms,
+    ), None
 
 
 class IndexingPipeline:
@@ -232,11 +248,19 @@ class IndexingPipeline:
         embed_ms = (time.perf_counter() - t0) * 1000
         logger.info("[%s] embed: %.0fms (%d chunks)", path.name, embed_ms, len(chunks))
 
+        # Compute content hash for reindex skip optimisation
+        try:
+            content_hash = compute_file_hash(path)
+        except OSError:
+            content_hash = ""
+
         # Store metadata
         yield IndexStatus(StatusType.STORING, str(path))
         t0 = time.perf_counter()
         try:
-            doc_id = self.store.upsert_document(path, num_chunks=len(chunks))
+            doc_id = self.store.upsert_document(
+                path, num_chunks=len(chunks), content_hash=content_hash,
+            )
             chunk_ids = self.store.add_chunks(
                 doc_id,
                 [(c.text, c.chunk_index, c.char_offset) for c in chunks],
@@ -292,18 +316,36 @@ class IndexingPipeline:
         """
         directory = directory.resolve()
         mem_start = log_memory("index-directory-start")
+        pipeline_t0 = time.perf_counter()
+
+        # Per-stage accumulators (seconds)
+        stage_times = {
+            "discovery": 0.0,
+            "parse": 0.0,
+            "chunk": 0.0,
+            "embed": 0.0,
+            "store": 0.0,
+            "index": 0.0,
+        }
+        total_chunks_produced = 0
 
         # Discover
+        t_disc = time.perf_counter()
         yield IndexStatus(StatusType.DISCOVERY, str(directory), "Scanning...")
         files = self.discover_files(directory)
         yield IndexStatus(StatusType.DISCOVERY, str(directory), f"Found {len(files)} files")
 
         # Filter to files needing indexing
         files_to_index = [f for f in files if self.store.needs_indexing(f)]
+        stage_times["discovery"] = time.perf_counter() - t_disc
         yield IndexStatus(
             StatusType.DISCOVERY,
             str(directory),
             f"{len(files_to_index)} files need indexing ({len(files) - len(files_to_index)} up to date)",
+        )
+        logger.info(
+            "Discovery: %.0fms, %d files found, %d need indexing",
+            stage_times["discovery"] * 1000, len(files), len(files_to_index),
         )
 
         indexed = 0
@@ -322,10 +364,18 @@ class IndexingPipeline:
             Returns list of (path, num_chunks) for files that were stored,
             so the caller can yield COMPLETE statuses.
             """
-            nonlocal indexed, all_embeddings, all_chunk_ids
+            nonlocal indexed, all_embeddings, all_chunk_ids, total_chunks_produced
 
             if not pending_chunk_texts:
                 return []
+
+            n_chunks = len(pending_chunk_texts)
+            n_files = len(pending_files)
+
+            # Aggregate parse/chunk times from pending files
+            for pf in pending_files:
+                stage_times["parse"] += pf.parse_ms / 1000
+                stage_times["chunk"] += pf.chunk_ms / 1000
 
             t0 = time.perf_counter()
             # Use ONNX_INNER_BATCH for the actual session.run() call size so
@@ -342,8 +392,13 @@ class IndexingPipeline:
                 pending_chunk_texts.clear()
                 return []
 
-            embed_ms = (time.perf_counter() - t0) * 1000
-            logger.info("batch embed: %.0fms (%d chunks)", embed_ms, len(pending_chunk_texts))
+            embed_s = time.perf_counter() - t0
+            stage_times["embed"] += embed_s
+            logger.info(
+                "batch embed: %.0fms (%d chunks from %d files, %.0f chunks/sec)",
+                embed_s * 1000, n_chunks, n_files,
+                n_chunks / embed_s if embed_s > 0 else 0,
+            )
 
             # Store results per-file
             completed: list[tuple[Path, int]] = []
@@ -353,9 +408,12 @@ class IndexingPipeline:
                 file_embeddings = embeddings[emb_offset:emb_offset + num_chunks]
                 emb_offset += num_chunks
 
-                t0 = time.perf_counter()
+                t_store = time.perf_counter()
                 try:
-                    doc_id = self.store.upsert_document(pf.path, num_chunks=num_chunks)
+                    doc_id = self.store.upsert_document(
+                        pf.path, num_chunks=num_chunks,
+                        content_hash=pf.content_hash,
+                    )
                     chunk_ids = self.store.add_chunks(
                         doc_id,
                         [(c.text, c.chunk_index, c.char_offset) for c in pf.chunks],
@@ -364,8 +422,11 @@ class IndexingPipeline:
                     logger.error("[%s] Store failed: %s", pf.path.name, exc, exc_info=True)
                     self._mark_failed(pf.path)
                     continue
+                store_s = time.perf_counter() - t_store
+                stage_times["store"] += store_s
 
                 # Feed into search engine if available
+                t_idx = time.perf_counter()
                 if self.search_engine is not None:
                     try:
                         docs = [
@@ -375,13 +436,12 @@ class IndexingPipeline:
                         self.search_engine.add_documents(docs)
                     except Exception as exc:
                         logger.warning("[%s] Search engine update failed: %s", pf.path.name, exc)
-
-                store_idx_ms = (time.perf_counter() - t0) * 1000
-                logger.info("[%s] store+index: %.0fms", pf.path.name, store_idx_ms)
+                stage_times["index"] += time.perf_counter() - t_idx
 
                 all_embeddings.append(file_embeddings)
                 all_chunk_ids.extend(chunk_ids)
                 indexed += 1
+                total_chunks_produced += num_chunks
                 completed.append((pf.path, num_chunks))
 
             pending_files.clear()
@@ -529,16 +589,34 @@ class IndexingPipeline:
             log_memory_delta(mem_pre, "after-embeddings-save")
 
         log_memory_delta(mem_start, "index-directory-end")
+
+        pipeline_elapsed = time.perf_counter() - pipeline_t0
+        files_per_sec = indexed / pipeline_elapsed if pipeline_elapsed > 0 else 0
+        chunks_per_sec = total_chunks_produced / pipeline_elapsed if pipeline_elapsed > 0 else 0
+
+        logger.info(
+            "Pipeline complete: %d files in %.1fs (%.1f files/sec, %.0f chunks/sec)",
+            indexed, pipeline_elapsed, files_per_sec, chunks_per_sec,
+        )
+        for stage, secs in stage_times.items():
+            logger.info("  stage %-10s: %.1fs", stage, secs)
+
         summary = {
             "indexed": indexed,
             "skipped": len(files) - len(files_to_index),
             "errors": errors,
             "total_files": len(files),
+            "total_chunks": total_chunks_produced,
+            "elapsed_sec": pipeline_elapsed,
+            "files_per_sec": files_per_sec,
+            "chunks_per_sec": chunks_per_sec,
+            "stage_times": stage_times,
         }
         yield IndexStatus(
             StatusType.COMPLETE,
             str(directory),
-            f"Done: {indexed} indexed, {skipped} skipped, {errors} errors",
+            f"Done: {indexed} indexed, {skipped} skipped, {errors} errors "
+            f"({files_per_sec:.1f} files/sec)",
         )
         return summary
 
@@ -566,9 +644,102 @@ class IndexingPipeline:
 
         return total_summary
 
+    def index_single_file(self, path: Path) -> bool:
+        """Index a single file synchronously (not a generator).
+
+        Parses → chunks → embeds → stores → adds to search engine.
+        Returns True on success, False on failure.
+        Used by the file watcher for incremental indexing.
+        """
+        path = path.resolve()
+        logger.info("[incremental] Indexing single file: %s", path)
+
+        # Mark as in-progress for crash recovery
+        try:
+            self.store.mark_indexing_started(path)
+        except Exception as exc:
+            logger.warning("[%s] Could not mark indexing started: %s", path.name, exc)
+
+        # Parse
+        try:
+            text = parse_file(path)
+        except Exception as exc:
+            logger.error("[%s] Parse failed: %s", path.name, exc)
+            self._mark_failed(path)
+            return False
+
+        if text is None:
+            logger.warning("[%s] Parse returned None", path.name)
+            self._mark_failed(path)
+            return False
+
+        # Chunk
+        try:
+            chunks = chunk_text(
+                text,
+                source_file=str(path),
+                chunk_size=self.config.chunk_size,
+                chunk_overlap=self.config.chunk_overlap,
+            )
+        except Exception as exc:
+            logger.error("[%s] Chunking failed: %s", path.name, exc)
+            self._mark_failed(path)
+            return False
+
+        if not chunks:
+            logger.warning("[%s] No chunks produced", path.name)
+            self._mark_failed(path)
+            return False
+
+        # Embed
+        chunk_texts = [c.text for c in chunks]
+        try:
+            embeddings = self.embedder.embed(chunk_texts)
+        except Exception as exc:
+            logger.error("[%s] Embedding failed: %s", path.name, exc)
+            self._mark_failed(path)
+            return False
+
+        # Store
+        try:
+            doc_id = self.store.upsert_document(path, num_chunks=len(chunks))
+            chunk_ids = self.store.add_chunks(
+                doc_id,
+                [(c.text, c.chunk_index, c.char_offset) for c in chunks],
+            )
+        except Exception as exc:
+            logger.error("[%s] Store failed: %s", path.name, exc)
+            self._mark_failed(path)
+            return False
+
+        # Add to search engine
+        if self.search_engine is not None:
+            try:
+                docs = [
+                    (str(cid), ct, emb)
+                    for cid, ct, emb in zip(chunk_ids, chunk_texts, embeddings)
+                ]
+                self.search_engine.add_documents(docs)
+            except Exception as exc:
+                logger.warning("[%s] Search engine update failed: %s", path.name, exc)
+
+        logger.info("[%s] Incremental index complete: %d chunks", path.name, len(chunks))
+        return True
+
     def remove_file(self, path: Path) -> bool:
-        """Remove a file from the index."""
-        return self.store.delete_document(path.resolve())
+        """Remove a file from the index (store + search engine)."""
+        path = path.resolve()
+        # Remove chunks from search engine first
+        if self.search_engine is not None:
+            doc_record = self.store.get_document(path)
+            if doc_record is not None:
+                chunks = self.store.get_chunks(doc_record.id)
+                for chunk in chunks:
+                    try:
+                        self.search_engine.delete_document(str(chunk.id))
+                    except Exception as exc:
+                        logger.warning("Failed to remove chunk %d from search engine: %s", chunk.id, exc)
+        return self.store.delete_document(path)
 
     def close(self) -> None:
         """Clean up resources."""

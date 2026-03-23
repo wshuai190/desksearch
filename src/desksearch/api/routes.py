@@ -54,6 +54,7 @@ _pipeline = None  # IndexingPipeline
 _embedder = None  # Embedder
 _store = None  # MetadataStore
 _analytics = None  # AnalyticsStore
+_watcher = None  # FileWatcher
 
 # Cached document embeddings for related-doc and collection features
 _doc_embeddings: dict = {}
@@ -64,7 +65,7 @@ _doc_emb_loaded: bool = False
 
 def _warm_from_store() -> None:
     """Reload search engine from store after index changes."""
-    if _store is None or _engine is None:
+    if _store is None or _search_engine is None:
         return
     import numpy as np
     emb_path = _config.data_dir / "embeddings"
@@ -86,7 +87,7 @@ def _warm_from_store() -> None:
                         idx = i
                         break
                 if idx is not None and idx < len(embeddings):
-                    _engine.add_documents([(cid, text, embeddings[idx])])
+                    _search_engine.add_documents([(cid, text, embeddings[idx])])
 
 
 def set_config(config: Config) -> None:
@@ -110,6 +111,12 @@ def set_components(search_engine, pipeline, embedder, store) -> None:
     _store = store
     analytics_db = _config.data_dir / "analytics.db"
     _analytics = AnalyticsStore(analytics_db)
+
+
+def set_watcher(watcher) -> None:
+    """Inject the file watcher instance at startup."""
+    global _watcher
+    _watcher = watcher
 
 
 def _ensure_doc_embeddings() -> None:
@@ -503,9 +510,9 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
             global _doc_emb_loaded
             _doc_emb_loaded = False  # force reload of doc embeddings after re-index
             # Persist FAISS index to disk so it survives restarts
-            if _engine:
+            if _search_engine:
                 try:
-                    _engine.save()
+                    _search_engine.save()
                     logger.info("Search index saved to disk")
                 except Exception:
                     logger.exception("Failed to save search index")
@@ -795,8 +802,8 @@ async def remove_folder(folder_path: str) -> dict[str, str]:
         if deleted > 0:
             logger.info("Cleaned up %d indexed documents from removed folder: %s", deleted, p)
             # Rebuild search engine index
-            if _engine:
-                _engine.clear()
+            if _search_engine:
+                _search_engine.clear()
                 _warm_from_store()
 
     return {"status": "ok", "removed": str(p)}
@@ -811,8 +818,8 @@ async def clear_index() -> dict[str, str | int]:
     docs, chunks = _store.clear_all()
 
     # Clear search engine
-    if _engine:
-        _engine.clear()
+    if _search_engine:
+        _search_engine.clear()
 
     # Remove embeddings files
     import shutil
@@ -834,8 +841,8 @@ async def clear_folder_index(folder_path: str) -> dict[str, str | int]:
     p = Path(folder_path).expanduser().resolve()
     deleted = _store.delete_documents_by_prefix(str(p))
 
-    if deleted > 0 and _engine:
-        _engine.clear()
+    if deleted > 0 and _search_engine:
+        _search_engine.clear()
         _warm_from_store()
 
     return {"status": "ok", "folder": str(p), "documents_removed": deleted}

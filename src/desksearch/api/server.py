@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from desksearch.api.routes import router, ws_router, set_config, set_components
+from desksearch.api.routes import router, ws_router, set_config, set_components, set_watcher
 from desksearch.api.integrations import (
     integrations_router,
     set_config as integrations_set_config,
@@ -18,6 +18,7 @@ from desksearch.core.search import HybridSearchEngine
 from desksearch.indexer.embedder import Embedder
 from desksearch.indexer.pipeline import IndexingPipeline
 from desksearch.indexer.store import MetadataStore
+from desksearch.indexer.watcher import FileWatcher
 from desksearch.utils.memory import log_memory, log_memory_delta
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,8 @@ def create_app(
     everything from scratch.  When called with pre-built components (daemon
     mode), reuses them so there is a single shared embedder / engine / store.
     """
+    t_startup = time.perf_counter()
+
     config = config or Config.load()
     config.data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -90,6 +93,37 @@ def create_app(
 
     set_components(engine, pipeline, embedder, store)
     integrations_set_components(engine, pipeline, embedder, store)
+
+    # --- File watcher for incremental indexing ---
+    def _on_file_created(path):
+        logger.info("Watcher: indexing new file %s", path)
+        try:
+            pipeline.index_single_file(path)
+        except Exception:
+            logger.exception("Watcher: failed to index %s", path)
+
+    def _on_file_modified(path):
+        logger.info("Watcher: re-indexing modified file %s", path)
+        try:
+            pipeline.remove_file(path)
+            pipeline.index_single_file(path)
+        except Exception:
+            logger.exception("Watcher: failed to re-index %s", path)
+
+    def _on_file_deleted(path):
+        logger.info("Watcher: removing deleted file %s", path)
+        try:
+            pipeline.remove_file(path)
+        except Exception:
+            logger.exception("Watcher: failed to remove %s", path)
+
+    watcher = FileWatcher(
+        config,
+        on_created=_on_file_created,
+        on_modified=_on_file_modified,
+        on_deleted=_on_file_deleted,
+    )
+    set_watcher(watcher)
 
     app = FastAPI(
         title="DeskSearch",
@@ -139,6 +173,23 @@ def create_app(
     app.include_router(ws_router)
     app.include_router(integrations_router)
 
+    # Start file watcher on startup, stop on shutdown
+    @app.on_event("startup")
+    async def _start_watcher():
+        try:
+            watcher.start()
+            logger.info("File watcher started for %d paths", len(config.index_paths))
+        except Exception:
+            logger.exception("Failed to start file watcher")
+
+    @app.on_event("shutdown")
+    async def _stop_watcher():
+        try:
+            watcher.stop()
+            logger.info("File watcher stopped")
+        except Exception:
+            logger.exception("Failed to stop file watcher")
+
     # Auto-index on startup if folders are configured but nothing is indexed
     @app.on_event("startup")
     async def _auto_index_if_empty():
@@ -161,6 +212,9 @@ def create_app(
     # Serve built React UI if available
     if UI_DIST_DIR.is_dir():
         app.mount("/", StaticFiles(directory=str(UI_DIST_DIR), html=True), name="ui")
+
+    startup_s = time.perf_counter() - t_startup
+    logger.info("DeskSearch ready in %.1fs", startup_s)
 
     return app
 

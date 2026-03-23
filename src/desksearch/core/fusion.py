@@ -1,9 +1,17 @@
-"""Reciprocal Rank Fusion (RRF) for combining multiple ranked result lists."""
+"""Reciprocal Rank Fusion (RRF) for combining multiple ranked result lists.
+
+Performance notes:
+- ``weighted_rrf`` uses a fast path with numpy pre-allocated arrays instead of
+  Python dict accumulation for the common two-system (BM25 + dense) case.
+- ``reciprocal_rank_fusion`` remains dict-based for the generic N-system case.
+"""
 
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
+
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -75,6 +83,9 @@ def weighted_rrf(
 ) -> list[FusedResult]:
     """Convenience wrapper for two-system fusion with an alpha weight.
 
+    Uses a fast path: builds a doc_id→index mapping, pre-computes RRF
+    contributions with numpy vectorized ops, then sorts once.
+
     Args:
         bm25_results: BM25 scored results.
         dense_results: Dense/vector scored results.
@@ -87,9 +98,67 @@ def weighted_rrf(
     """
     bm25_weight = 1.0 - alpha
     dense_weight = alpha
-    return reciprocal_rank_fusion(
-        bm25_results,
-        dense_results,
-        k=k,
-        weights=[bm25_weight, dense_weight],
-    )
+
+    n_bm25 = len(bm25_results)
+    n_dense = len(dense_results)
+
+    if n_bm25 == 0 and n_dense == 0:
+        return []
+
+    # Build doc_id → index mapping and rank lookups in one pass.
+    doc_ids: list[str] = []
+    doc_id_to_idx: dict[str, int] = {}
+    doc_bm25_rank: dict[str, int] = {}
+    doc_dense_rank: dict[str, int] = {}
+
+    for rank_0, (doc_id, _) in enumerate(bm25_results):
+        if doc_id not in doc_id_to_idx:
+            doc_id_to_idx[doc_id] = len(doc_ids)
+            doc_ids.append(doc_id)
+        doc_bm25_rank[doc_id] = rank_0 + 1
+
+    for rank_0, (doc_id, _) in enumerate(dense_results):
+        if doc_id not in doc_id_to_idx:
+            doc_id_to_idx[doc_id] = len(doc_ids)
+            doc_ids.append(doc_id)
+        doc_dense_rank[doc_id] = rank_0 + 1
+
+    n_docs = len(doc_ids)
+
+    # Pre-allocate score array and compute RRF contributions with numpy.
+    scores = np.zeros(n_docs, dtype=np.float64)
+
+    if n_bm25 > 0 and bm25_weight > 0:
+        bm25_indices = np.array(
+            [doc_id_to_idx[doc_id] for doc_id, _ in bm25_results], dtype=np.intp
+        )
+        bm25_ranks = np.arange(1, n_bm25 + 1, dtype=np.float64)
+        bm25_contrib = bm25_weight / (k + bm25_ranks)
+        np.add.at(scores, bm25_indices, bm25_contrib)
+
+    if n_dense > 0 and dense_weight > 0:
+        dense_indices = np.array(
+            [doc_id_to_idx[doc_id] for doc_id, _ in dense_results], dtype=np.intp
+        )
+        dense_ranks = np.arange(1, n_dense + 1, dtype=np.float64)
+        dense_contrib = dense_weight / (k + dense_ranks)
+        np.add.at(scores, dense_indices, dense_contrib)
+
+    # Sort by descending score using numpy argsort (faster than Python sort).
+    sorted_indices = np.argsort(scores)[::-1]
+
+    # Filter out zero-score docs (shouldn't happen, but defensive).
+    fused: list[FusedResult] = []
+    for idx in sorted_indices:
+        s = scores[idx]
+        if s <= 0:
+            break
+        doc_id = doc_ids[idx]
+        fused.append(FusedResult(
+            doc_id=doc_id,
+            score=float(s),
+            bm25_rank=doc_bm25_rank.get(doc_id),
+            dense_rank=doc_dense_rank.get(doc_id),
+        ))
+
+    return fused

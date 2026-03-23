@@ -391,6 +391,34 @@ class HybridSearchEngine:
             self.dense.save()
         # BM25 (tantivy) auto-commits on write
 
+    def clear(self) -> None:
+        """Clear all indexes and caches.
+
+        Reinitialises BM25 and FAISS from scratch so callers can rebuild
+        the search engine after bulk deletions.
+        """
+        # Recreate the BM25 index (tantivy) — clear by rebuilding
+        try:
+            if self.bm25.available:
+                self.bm25 = BM25Index(self._config.data_dir)
+        except Exception as exc:
+            logger.warning("Failed to clear BM25 index: %s", exc)
+
+        # Recreate the FAISS index
+        try:
+            if self.dense.available:
+                self.dense = DenseIndex(
+                    self._config.data_dir,
+                    dimension=self.dense._dimension,
+                )
+        except Exception as exc:
+            logger.warning("Failed to clear dense index: %s", exc)
+
+        # Clear text and result caches
+        self._doc_texts = _LRUTextCache(_DOC_TEXT_CACHE_SIZE)
+        if self._cache:
+            self._cache.clear()
+
     # ------------------------------------------------------------------
     # Search
     # ------------------------------------------------------------------

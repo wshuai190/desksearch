@@ -1,7 +1,7 @@
 """SQLite metadata store for indexed documents and chunks.
 
 Stores document metadata and chunk text for retrieval. Supports checking
-whether files need re-indexing based on modification time.
+whether files need re-indexing based on modification time and content hash.
 
 Thread-safety: a threading.Lock serialises all write operations so the
 pipeline (thread-pool) and the API (async) can coexist without corruption.
@@ -13,6 +13,7 @@ to ``'indexing'`` before processing begins and updated to ``'done'`` or
 ``'failed'`` once finished.  If the process crashes mid-way, the next run
 sees ``indexing_state='indexing'`` and re-indexes the file from scratch.
 """
+import hashlib
 import sqlite3
 import threading
 import time
@@ -29,6 +30,18 @@ STATE_INDEXING = "indexing"
 STATE_FAILED = "failed"
 
 
+def compute_file_hash(path: Path, buf_size: int = 65536) -> str:
+    """Compute SHA-256 hex digest of a file's contents."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            data = f.read(buf_size)
+            if not data:
+                break
+            h.update(data)
+    return h.hexdigest()
+
+
 @dataclass
 class DocumentRecord:
     """A stored document record."""
@@ -42,6 +55,7 @@ class DocumentRecord:
     indexed_time: float
     num_chunks: int
     indexing_state: str = STATE_DONE
+    content_hash: str = ""
 
 
 @dataclass
@@ -128,6 +142,16 @@ class MetadataStore:
             except sqlite3.OperationalError:
                 pass  # Column already exists — nothing to do
 
+            # Migration: add content_hash column for content-based skip.
+            try:
+                self.conn.execute(
+                    "ALTER TABLE documents ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''"
+                )
+                self.conn.commit()
+                logger.debug("Migration: added content_hash column to documents table")
+            except sqlite3.OperationalError:
+                pass  # Column already exists
+
     # ------------------------------------------------------------------
     # Indexing state management (crash recovery)
     # ------------------------------------------------------------------
@@ -194,9 +218,12 @@ class MetadataStore:
         - the file was modified since last indexed, OR
         - a previous indexing attempt was interrupted (state='indexing'), OR
         - a previous indexing attempt failed (state='failed').
+
+        Content hash optimisation: if the mtime changed but the content hash
+        matches, the file is considered unchanged and skipped.
         """
         row = self.conn.execute(
-            "SELECT modified_time, indexing_state FROM documents WHERE path = ?",
+            "SELECT modified_time, indexing_state, content_hash FROM documents WHERE path = ?",
             (str(path),),
         ).fetchone()
         if row is None:
@@ -204,12 +231,37 @@ class MetadataStore:
         # Crashed mid-way or explicitly failed → always retry
         if row["indexing_state"] in (STATE_INDEXING, STATE_FAILED):
             logger.debug(
-                "File %s has state '%s' → scheduling re-index",
+                "File %s has state \'%s\' → scheduling re-index",
                 path.name,
                 row["indexing_state"],
             )
             return True
-        return path.stat().st_mtime > row["modified_time"]
+        try:
+            stat = path.stat()
+        except OSError:
+            return True
+        if stat.st_mtime <= row["modified_time"]:
+            return False
+        # mtime changed — check content hash to avoid unnecessary re-index
+        stored_hash = row["content_hash"] if row["content_hash"] else None
+        if stored_hash:
+            try:
+                current_hash = compute_file_hash(path)
+                if current_hash == stored_hash:
+                    with self._write_lock:
+                        self.conn.execute(
+                            "UPDATE documents SET modified_time = ? WHERE path = ?",
+                            (stat.st_mtime, str(path)),
+                        )
+                        self.conn.commit()
+                    logger.debug(
+                        "File %s mtime changed but content hash matches — skipping",
+                        path.name,
+                    )
+                    return False
+            except OSError:
+                pass
+        return True
 
     def get_document(self, path: Path) -> Optional[DocumentRecord]:
         """Get a document record by path."""
@@ -236,18 +288,25 @@ class MetadataStore:
         d = dict(row)
         # indexing_state may be absent in old rows fetched before migration
         d.setdefault("indexing_state", STATE_DONE)
+        d.setdefault("content_hash", "")
         return DocumentRecord(**d)
 
     def upsert_document(
         self,
         path: Path,
         num_chunks: int,
+        content_hash: str = "",
     ) -> int:
         """Insert or update a document record. Returns the document ID.
 
         Sets indexing_state to 'done' on the assumption that upsert is called
         only after chunks have been written.  Use ``mark_indexing_started``
         before you begin processing a file to get crash-recovery semantics.
+
+        Args:
+            path: File path.
+            num_chunks: Number of chunks produced.
+            content_hash: SHA-256 hex digest of file contents.
         """
         stat = path.stat()
         now = time.time()
@@ -260,9 +319,10 @@ class MetadataStore:
                 self.conn.execute(
                     """UPDATE documents
                        SET size = ?, modified_time = ?, indexed_time = ?,
-                           num_chunks = ?, indexing_state = ?
+                           num_chunks = ?, indexing_state = ?, content_hash = ?
                        WHERE id = ?""",
-                    (stat.st_size, stat.st_mtime, now, num_chunks, STATE_DONE, existing.id),
+                    (stat.st_size, stat.st_mtime, now, num_chunks, STATE_DONE,
+                     content_hash, existing.id),
                 )
                 self.conn.commit()
                 return existing.id
@@ -270,8 +330,8 @@ class MetadataStore:
             cursor = self.conn.execute(
                 """INSERT INTO documents
                        (path, filename, extension, size, modified_time, indexed_time,
-                        num_chunks, indexing_state)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        num_chunks, indexing_state, content_hash)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     str(path),
                     path.name,
@@ -281,6 +341,7 @@ class MetadataStore:
                     now,
                     num_chunks,
                     STATE_DONE,
+                    content_hash,
                 ),
             )
             self.conn.commit()
@@ -369,6 +430,34 @@ class MetadataStore:
             chunk_ids,
         ).fetchall()
         return {row["id"]: ChunkRecord(**dict(row)) for row in rows}
+
+    def clear_all(self) -> tuple[int, int]:
+        """Delete ALL documents and chunks. Returns (docs_deleted, chunks_deleted)."""
+        doc_count = self.document_count()
+        chunk_count = self.chunk_count()
+        with self._write_lock:
+            self.conn.execute("DELETE FROM chunks")
+            self.conn.execute("DELETE FROM documents")
+            self.conn.commit()
+        return doc_count, chunk_count
+
+    def delete_documents_by_prefix(self, path_prefix: str) -> int:
+        """Delete all documents whose path starts with the given prefix.
+
+        Returns the number of documents deleted.
+        """
+        rows = self.conn.execute(
+            "SELECT id FROM documents WHERE path LIKE ?",
+            (f"{path_prefix}%",),
+        ).fetchall()
+        if not rows:
+            return 0
+        ids = [r["id"] for r in rows]
+        with self._write_lock:
+            for doc_id in ids:
+                self.conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
+            self.conn.commit()
+        return len(ids)
 
     def ping(self) -> bool:
         """Return True if the database connection is healthy."""

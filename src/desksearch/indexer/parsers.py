@@ -4,6 +4,7 @@ Registry-based parser system. Each parser is a callable that takes a file path
 and returns extracted plain text. New parsers can be added via register_parser().
 """
 import logging
+import time
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -67,14 +68,22 @@ def parse_file(path: Path) -> Optional[str]:
     if parser is None:
         logger.warning("No parser registered for extension: %s", ext)
         return None
+    t0 = time.perf_counter()
     try:
         text = parser(path)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        parser_name = getattr(parser, "__name__", "unknown")
         if text and text.strip():
+            logger.debug(
+                "[%s] parser=%s elapsed=%.1fms chars=%d",
+                path.name, parser_name, elapsed_ms, len(text),
+            )
             return text.strip()
-        logger.warning("Parser returned empty text for: %s", path)
+        logger.warning("Parser returned empty text for: %s (%.1fms)", path, elapsed_ms)
         return None
     except Exception:
-        logger.exception("Failed to parse file: %s", path)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        logger.exception("Failed to parse file: %s (%.1fms)", path, elapsed_ms)
         return None
 
 
