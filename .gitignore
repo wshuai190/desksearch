@@ -28,3 +28,4 @@ Thumbs.db
 job-search/
 arxiv-daily/
 OVERNIGHT_PLAN.md
+publish-pypi.sh
