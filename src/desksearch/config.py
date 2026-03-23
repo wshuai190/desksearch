@@ -19,8 +19,7 @@ DEFAULT_EMBEDDING_MODEL = "ielabgroup/Starbucks-msmarco"
 STARBUCKS_TIERS = {
     "fast": (2, 32),       # ~3x faster, tiny index, good for local file search
     "regular": (4, 64),    # balanced speed/quality
-    "pro": (6, 128),       # near full-model quality
-    "full": (12, 768),     # full BERT-base (not recommended for local search)
+    "pro": (6, 128),       # max quality (6 layers saved locally, nothing larger needed)
 }
 DEFAULT_CHUNK_SIZE = 512
 DEFAULT_CHUNK_OVERLAP = 64

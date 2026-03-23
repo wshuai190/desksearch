@@ -150,37 +150,84 @@ class Embedder:
             )
             self._touch()
 
+    # Max layers we ever need — pre-cut the model to this on first download
+    _MAX_LAYERS = 6
+
+    def _get_local_model_path(self) -> Path:
+        """Return path to the locally saved 6-layer Starbucks model."""
+        return Path.home() / ".desksearch" / "models" / "starbucks-6layer"
+
+    def _ensure_local_model(self) -> Path:
+        """Download the full Starbucks model once, save a 6-layer version locally.
+
+        Subsequent loads use the local 6-layer model — faster startup, less disk.
+        The full 12-layer model is never kept; only layers 0-5 are saved.
+        """
+        from transformers import AutoTokenizer, AutoModel, AutoConfig
+
+        local_path = self._get_local_model_path()
+
+        if (local_path / "config.json").exists():
+            return local_path
+
+        logger.info("First-time setup: downloading Starbucks model and saving 6-layer version...")
+        local_path.mkdir(parents=True, exist_ok=True)
+
+        # Download full model, then save only 6 layers
+        config = AutoConfig.from_pretrained(
+            self.model_name,
+            num_hidden_layers=self._MAX_LAYERS,
+        )
+        model = AutoModel.from_pretrained(self.model_name, config=config)
+        model.save_pretrained(local_path)
+
+        # Save tokenizer too
+        tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        tokenizer.save_pretrained(local_path)
+
+        logger.info("Saved 6-layer Starbucks model to %s", local_path)
+        del model
+        import gc; gc.collect()
+
+        return local_path
+
     def _load_starbucks(self) -> None:
-        """Load Starbucks model with truncated layers for real speedup."""
+        """Load Starbucks model with truncated layers for real speedup.
+
+        Uses locally saved 6-layer model. If user picks 'fast' (2 layers),
+        only 2 layers are loaded — real compute savings via AutoConfig.
+        """
         import torch
         from transformers import AutoTokenizer, AutoModel, AutoConfig
 
+        # Ensure we have the 6-layer model saved locally
+        local_path = self._ensure_local_model()
+
         logger.info(
-            "Loading Starbucks model: %s (layers=%d, dim=%d)",
-            self.model_name, self._target_layers, self._target_dim,
+            "Loading Starbucks model: %d of 6 layers, %dd output",
+            self._target_layers, self._target_dim,
         )
 
-        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self._tokenizer = AutoTokenizer.from_pretrained(local_path)
 
-        # Load only N layers — this is real compute savings, not just truncating output
+        # Load only the layers we need (2, 4, or 6)
         config = AutoConfig.from_pretrained(
-            self.model_name,
+            local_path,
             num_hidden_layers=self._target_layers,
         )
         self._model = AutoModel.from_pretrained(
-            self.model_name, config=config
+            local_path, config=config
         ).eval()
 
-        # Disable gradient computation globally for inference
+        # Disable gradients for inference
         for param in self._model.parameters():
             param.requires_grad = False
 
         self._dimension = self._target_dim
         self._backend = "starbucks"
 
-        # Verify layer count
         n_layers = len(self._model.encoder.layer)
-        logger.info("Starbucks model loaded: %d layers (of 12), %dd output", n_layers, self._target_dim)
+        logger.info("Starbucks model ready: %d layers, %dd embeddings", n_layers, self._target_dim)
 
     def _get_onnx_model_path(self) -> Path:
         try:
