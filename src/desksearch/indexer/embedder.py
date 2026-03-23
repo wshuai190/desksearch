@@ -1,15 +1,14 @@
-"""Local embedding with ONNX Runtime (low memory) or sentence-transformers fallback.
+"""Embedding engine using Starbucks 2D Matryoshka model (ielabgroup/Starbucks-msmarco).
 
-Default path uses ONNX Runtime + HuggingFace tokenizers for ~200MB RAM.
-Falls back to sentence-transformers (~1.4GB RAM) if onnxruntime is not installed.
+Supports three speed tiers via layer × dimension truncation:
+  - fast:    2 layers, 32d  (~3x faster than full, tiny index)
+  - regular: 4 layers, 64d  (balanced — default)
+  - pro:     6 layers, 128d (near full-model quality)
 
-The model is loaded lazily on first use and auto-unloaded after idle timeout.
+Uses CLS token pooling (not mean pooling) — this is what Starbucks was trained with.
+Loads only the needed layers via AutoConfig(num_hidden_layers=N) for real speedup.
 
-Chunk-level embedding cache: ``embed_with_cache()`` accepts a list of texts and
-an optional parallel list of content keys (e.g. SHA-256 hashes of the chunk
-text).  Cache hits are returned directly; only misses go to ONNX inference.
-This accelerates re-indexing of partially modified files and large corpora that
-share many repeated chunks (boilerplate, headers, etc.).
+Falls back to all-MiniLM-L6-v2 via ONNX if Starbucks model can't be loaded.
 """
 import gc
 import hashlib
@@ -22,20 +21,19 @@ from typing import Optional
 
 import numpy as np
 
-from desksearch.config import DEFAULT_EMBEDDING_MODEL
+from desksearch.config import DEFAULT_EMBEDDING_MODEL, STARBUCKS_TIERS
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_IDLE_TIMEOUT = 300  # 5 minutes
 
-# HuggingFace ONNX model repo for all-MiniLM-L6-v2
+# Fallback ONNX model
 _ONNX_MODEL_REPO = "sentence-transformers/all-MiniLM-L6-v2"
 _ONNX_MODEL_FILE = "onnx/model.onnx"
-_ONNX_DIMENSION = 384  # Known dimension for all-MiniLM-L6-v2
+_ONNX_DIMENSION = 384
 
 
 def _onnx_available() -> bool:
-    """Check if onnxruntime is installed."""
     try:
         import onnxruntime  # noqa: F401
         return True
@@ -43,8 +41,15 @@ def _onnx_available() -> bool:
         return False
 
 
+def _transformers_available() -> bool:
+    try:
+        import transformers  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def _sentence_transformers_available() -> bool:
-    """Check if sentence-transformers is installed."""
     try:
         import sentence_transformers  # noqa: F401
         return True
@@ -53,19 +58,13 @@ def _sentence_transformers_available() -> bool:
 
 
 class Embedder:
-    """Wraps an embedding model for generating embeddings.
+    """Embedding engine with Starbucks 2D Matryoshka support.
 
-    Prefers ONNX Runtime (low memory) and falls back to sentence-transformers.
-    The model is loaded lazily, cached, and auto-unloaded after idle.
+    Primary: loads Starbucks model with truncated layers for real inference speedup.
+    Fallback: ONNX MiniLM with dimension truncation.
     """
 
-    # Maximum number of single-query embeddings to cache.
-    # Memory cost: _QUERY_CACHE_SIZE * 384 * 4 bytes ≈ 512 * 384 * 4 ≈ 768 KB
     _QUERY_CACHE_SIZE = 512
-
-    # Maximum number of chunk embeddings to cache across index runs.
-    # Memory cost: _CHUNK_CACHE_SIZE * 384 * 4 bytes ≈ 8192 * 384 * 4 ≈ 12 MB
-    # This covers ~64 documents at ~128 chunks each — plenty for re-index runs.
     _CHUNK_CACHE_SIZE = 8192
 
     def __init__(
@@ -73,31 +72,27 @@ class Embedder:
         model_name: str = DEFAULT_EMBEDDING_MODEL,
         idle_timeout: float = _DEFAULT_IDLE_TIMEOUT,
         embedding_dim: int = 64,
+        embedding_layers: int = 4,
     ) -> None:
         self.model_name = model_name
         self.idle_timeout = idle_timeout
-        self._target_dim = embedding_dim  # Matryoshka truncation target
+        self._target_dim = embedding_dim
+        self._target_layers = embedding_layers
 
-        self._model = None          # SentenceTransformer or None
-        self._onnx_session = None   # onnxruntime.InferenceSession or None
-        self._tokenizer = None      # AutoTokenizer or None
-        self._backend: Optional[str] = None  # "onnx" or "sentence_transformers"
+        self._model = None              # transformers AutoModel
+        self._tokenizer = None          # transformers AutoTokenizer or tokenizers.Tokenizer
+        self._onnx_session = None       # ONNX fallback
+        self._backend: Optional[str] = None  # "starbucks", "onnx", or "sentence_transformers"
         self._lock = threading.Lock()
         self._last_used: float = 0.0
         self._unload_timer: Optional[threading.Timer] = None
         self._dimension: Optional[int] = None
 
-        # LRU cache for single-query embeddings.  Keyed on the raw query string.
-        # Thread-safe because reads/writes are protected by _query_cache_lock.
+        # LRU caches
         self._query_cache: OrderedDict[str, np.ndarray] = OrderedDict()
         self._query_cache_lock = threading.Lock()
-
-        # LRU cache for chunk embeddings.  Keyed on SHA-256 hex digest of the
-        # chunk text.  Populated by embed_with_cache(); allows re-indexing of
-        # partially-changed files without re-embedding identical chunks.
         self._chunk_cache: OrderedDict[str, np.ndarray] = OrderedDict()
         self._chunk_cache_lock = threading.Lock()
-        # Stats for observability
         self._chunk_cache_hits: int = 0
         self._chunk_cache_misses: int = 0
 
@@ -107,151 +102,136 @@ class Embedder:
 
     @property
     def is_loaded(self) -> bool:
-        """Whether the embedding model is currently in memory."""
         return self._model is not None or self._onnx_session is not None
 
     @property
     def backend(self) -> Optional[str]:
-        """Return which backend is active: 'onnx' or 'sentence_transformers'."""
         return self._backend
 
-    def _get_onnx_model_path(self) -> Path:
-        """Download/cache the ONNX model and return its path.
-
-        Raises a user-friendly RuntimeError when the download fails so the
-        operator gets actionable guidance rather than a cryptic traceback.
-        """
-        try:
-            from huggingface_hub import hf_hub_download
-        except ImportError as exc:
-            raise RuntimeError(
-                "huggingface_hub is required to download the ONNX model. "
-                "Install it with: pip install huggingface-hub"
-            ) from exc
-
-        try:
-            model_path = hf_hub_download(
-                repo_id=_ONNX_MODEL_REPO,
-                filename=_ONNX_MODEL_FILE,
-            )
-        except Exception as exc:
-            # Provide concrete, actionable error guidance.
-            hint = (
-                f"Failed to download ONNX model '{_ONNX_MODEL_REPO}/{_ONNX_MODEL_FILE}'.\n"
-                "Possible causes and fixes:\n"
-                "  1. No internet connection — connect and retry, or pre-cache the model.\n"
-                "  2. HuggingFace rate-limit — wait a moment and retry.\n"
-                "  3. Offline environment — set HF_HUB_OFFLINE=1 and ensure the model\n"
-                f"     is cached in ~/.cache/huggingface/hub/ (run once online first).\n"
-                "  4. Proxy/firewall — set HTTPS_PROXY or HF_ENDPOINT env vars.\n"
-                f"Original error: {exc}"
-            )
-            raise RuntimeError(hint) from exc
-
-        return Path(model_path)
-
     def _ensure_loaded(self):
-        """Load the model if not already loaded (thread-safe)."""
-        if self._onnx_session is not None or self._model is not None:
+        if self._model is not None or self._onnx_session is not None:
             self._touch()
             return
 
         with self._lock:
-            if self._onnx_session is not None or self._model is not None:
+            if self._model is not None or self._onnx_session is not None:
                 self._touch()
                 return
 
             t0 = time.perf_counter()
 
-            if _onnx_available() and self.model_name == DEFAULT_EMBEDDING_MODEL:
+            # Try Starbucks first (preferred)
+            if self.model_name == DEFAULT_EMBEDDING_MODEL and _transformers_available():
+                try:
+                    self._load_starbucks()
+                except Exception as e:
+                    logger.warning("Failed to load Starbucks model, falling back: %s", e)
+                    self._model = None
+                    self._tokenizer = None
+
+            # Fallback to ONNX MiniLM
+            if not self.is_loaded and _onnx_available():
                 self._load_onnx()
-            elif _sentence_transformers_available():
+
+            # Last resort: sentence-transformers
+            if not self.is_loaded and _sentence_transformers_available():
                 self._load_sentence_transformers()
-            else:
+
+            if not self.is_loaded:
                 raise RuntimeError(
-                    "No embedding backend available. Install onnxruntime "
-                    "(recommended, low memory) or sentence-transformers."
+                    "No embedding backend available. Install transformers "
+                    "(for Starbucks model) or onnxruntime (for MiniLM fallback)."
                 )
 
             elapsed = (time.perf_counter() - t0) * 1000
             logger.info(
-                "Model loaded in %.0fms via %s backend. Dimension: %d",
-                elapsed, self._backend, self._dimension,
+                "Embedder loaded in %.0fms via %s (layers=%s, dim=%d)",
+                elapsed, self._backend, self._target_layers, self._dimension,
             )
             self._touch()
 
+    def _load_starbucks(self) -> None:
+        """Load Starbucks model with truncated layers for real speedup."""
+        import torch
+        from transformers import AutoTokenizer, AutoModel, AutoConfig
+
+        logger.info(
+            "Loading Starbucks model: %s (layers=%d, dim=%d)",
+            self.model_name, self._target_layers, self._target_dim,
+        )
+
+        self._tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+
+        # Load only N layers — this is real compute savings, not just truncating output
+        config = AutoConfig.from_pretrained(
+            self.model_name,
+            num_hidden_layers=self._target_layers,
+        )
+        self._model = AutoModel.from_pretrained(
+            self.model_name, config=config
+        ).eval()
+
+        # Disable gradient computation globally for inference
+        for param in self._model.parameters():
+            param.requires_grad = False
+
+        self._dimension = self._target_dim
+        self._backend = "starbucks"
+
+        # Verify layer count
+        n_layers = len(self._model.encoder.layer)
+        logger.info("Starbucks model loaded: %d layers (of 12), %dd output", n_layers, self._target_dim)
+
+    def _get_onnx_model_path(self) -> Path:
+        try:
+            from huggingface_hub import hf_hub_download
+        except ImportError as exc:
+            raise RuntimeError(
+                "huggingface_hub is required for ONNX model. pip install huggingface-hub"
+            ) from exc
+        return Path(hf_hub_download(repo_id=_ONNX_MODEL_REPO, filename=_ONNX_MODEL_FILE))
+
     def _load_onnx(self) -> None:
-        """Load the ONNX model + lightweight tokenizer."""
+        """Load ONNX MiniLM fallback with dimension truncation."""
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
-        logger.info("Loading ONNX embedding model: %s", self.model_name)
+        logger.info("Loading ONNX fallback: %s (dim truncated to %d)", _ONNX_MODEL_REPO, self._target_dim)
 
-        # Download/cache the ONNX model
         model_path = self._get_onnx_model_path()
 
-        # Configure ONNX Runtime for maximum throughput on Apple Silicon.
-        #
-        # Benchmarks on M-series Mac mini (8-core, 4P+4E):
-        #   threads=4 → ~376 texts/sec   ← optimal (P-cores only)
-        #   threads=6 → ~359 texts/sec
-        #   threads=8 → ~339 texts/sec   (E-cores add overhead)
-        #
-        # Keep intra_op at 4 to hit the performance cores and leave the rest
-        # for parallel parse workers and the OS.  On non-Apple machines the
-        # heuristic of "half the logical CPUs, capped at 8" is still applied.
-        import os as _os
-        import platform as _platform
-        _ncpus = _os.cpu_count() or 4
-        _is_apple_silicon = (
-            _platform.system() == "Darwin"
-            and _platform.machine() in ("arm64", "aarch64")
-        )
-        if _is_apple_silicon:
-            # Performance cores only: typically 4 on M1/M2, 6 on M3 Pro+
-            _intra = min(4, _ncpus)
-            _inter = 1
-        else:
-            _intra = min(_ncpus // 2, 8)
-            _inter = min(max(_ncpus // 4, 1), 2)
+        import os, platform
+        ncpus = os.cpu_count() or 4
+        is_apple = platform.system() == "Darwin" and platform.machine() in ("arm64", "aarch64")
+        intra = min(4, ncpus) if is_apple else min(ncpus // 2, 8)
 
         sess_options = ort.SessionOptions()
         sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        sess_options.intra_op_num_threads = _intra
-        sess_options.inter_op_num_threads = _inter
-        # Disable memory pattern optimisation — saves ~30 MB RAM on MiniLM
-        # with negligible impact on throughput for fixed-size batches.
+        sess_options.intra_op_num_threads = intra
+        sess_options.inter_op_num_threads = 1
         sess_options.enable_mem_pattern = False
 
         self._onnx_session = ort.InferenceSession(
-            str(model_path),
-            sess_options=sess_options,
-            providers=["CPUExecutionProvider"],
+            str(model_path), sess_options=sess_options, providers=["CPUExecutionProvider"],
         )
-
-        # Use lightweight tokenizers library (not transformers)
         self._tokenizer = Tokenizer.from_pretrained(_ONNX_MODEL_REPO)
         self._tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
         self._tokenizer.enable_truncation(max_length=256)
-        self._dimension = _ONNX_DIMENSION
+        self._dimension = min(self._target_dim, _ONNX_DIMENSION)
         self._backend = "onnx"
 
     def _load_sentence_transformers(self) -> None:
-        """Load the sentence-transformers model (heavier, fallback)."""
         from sentence_transformers import SentenceTransformer
-
-        logger.info("Loading sentence-transformers model: %s", self.model_name)
-        self._model = SentenceTransformer(self.model_name)
-        self._dimension = self._model.get_sentence_embedding_dimension()
+        logger.info("Loading sentence-transformers fallback: all-MiniLM-L6-v2")
+        self._model = SentenceTransformer("all-MiniLM-L6-v2")
+        self._dimension = min(self._target_dim, self._model.get_sentence_embedding_dimension())
         self._backend = "sentence_transformers"
 
     def _touch(self) -> None:
-        """Record model usage and reset the auto-unload timer."""
         self._last_used = time.monotonic()
         self._schedule_unload()
 
     def _schedule_unload(self) -> None:
-        """Schedule auto-unload after idle_timeout seconds."""
         if self._unload_timer is not None:
             self._unload_timer.cancel()
         if self.idle_timeout > 0:
@@ -260,51 +240,34 @@ class Embedder:
             self._unload_timer.start()
 
     def _maybe_unload(self) -> None:
-        """Unload the model if it has been idle long enough."""
         if not self.is_loaded:
             return
-        elapsed = time.monotonic() - self._last_used
-        if elapsed >= self.idle_timeout:
-            logger.info(
-                "Model idle for %.0fs (threshold %.0fs), unloading to free memory",
-                elapsed, self.idle_timeout,
-            )
+        if time.monotonic() - self._last_used >= self.idle_timeout:
+            logger.info("Model idle for %.0fs, unloading", self.idle_timeout)
             self.cooldown()
 
     def warmup(self) -> None:
-        """Eagerly load the model and run a dummy embedding to warm up."""
         t0 = time.perf_counter()
         _ = self.embed(["warmup"])
-        elapsed = (time.perf_counter() - t0) * 1000
-        logger.info("Embedder warmup complete in %.0fms", elapsed)
+        logger.info("Embedder warmup in %.0fms", (time.perf_counter() - t0) * 1000)
 
     def cooldown(self) -> None:
-        """Explicitly unload the model to free memory."""
         with self._lock:
             if not self.is_loaded:
                 return
-
             self._model = None
             self._onnx_session = None
             self._tokenizer = None
             gc.collect()
-
             try:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except ImportError:
                 pass
-
-            logger.info("Embedding model unloaded (%s backend), memory freed", self._backend)
-
-        # Clear the query cache — embeddings from the old session are still
-        # valid (same model), but clearing avoids memory accumulation when the
-        # model cycles through idle/active phases.
+            logger.info("Embedding model unloaded (%s)", self._backend)
         with self._query_cache_lock:
             self._query_cache.clear()
-
-        # Clear chunk cache too (same reasoning)
         with self._chunk_cache_lock:
             self._chunk_cache.clear()
 
@@ -314,45 +277,35 @@ class Embedder:
 
     @property
     def dimension(self) -> int:
-        """Return the effective embedding dimension (after Matryoshka truncation)."""
         if self._dimension is not None:
-            return min(self._target_dim, self._dimension)
+            return self._dimension
         self._ensure_loaded()
-        return min(self._target_dim, self._dimension)
+        return self._dimension
 
-    def _truncate_and_normalize(self, embeddings: np.ndarray) -> np.ndarray:
-        """Truncate to target dimension and re-normalize (Matryoshka).
+    def _embed_starbucks(self, texts: list[str], batch_size: int) -> np.ndarray:
+        """Embed using Starbucks model — CLS token, truncated dimensions."""
+        import torch
 
-        When target_dim < model dimension, keeps only the first N dimensions
-        then L2-normalizes. This preserves ranking quality per the Matryoshka
-        representation learning principle.
-        """
-        if self._target_dim >= embeddings.shape[1]:
-            return embeddings
-        truncated = embeddings[:, :self._target_dim]
-        norms = np.linalg.norm(truncated, axis=1, keepdims=True)
-        norms = np.clip(norms, a_min=1e-9, a_max=None)
-        return (truncated / norms).astype(np.float32)
+        all_embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            inputs = self._tokenizer(
+                batch, return_tensors="pt", padding=True,
+                truncation=True, max_length=256,
+            )
 
-    def _mean_pool_and_normalize(
-        self, token_embeddings: np.ndarray, attention_mask: np.ndarray
-    ) -> np.ndarray:
-        """Mean pooling over token embeddings, then L2-normalize."""
-        # token_embeddings: (batch, seq_len, hidden)
-        # attention_mask: (batch, seq_len)
-        mask_expanded = attention_mask[:, :, np.newaxis].astype(np.float32)
-        summed = np.sum(token_embeddings * mask_expanded, axis=1)
-        counts = np.clip(mask_expanded.sum(axis=1), a_min=1e-9, a_max=None)
-        pooled = summed / counts
-        # L2 normalize
-        norms = np.linalg.norm(pooled, axis=1, keepdims=True)
-        norms = np.clip(norms, a_min=1e-9, a_max=None)
-        return (pooled / norms).astype(np.float32)
+            with torch.no_grad():
+                outputs = self._model(**inputs, return_dict=True)
+
+            # CLS token embedding, truncated to target dimensions
+            cls_embeddings = outputs.last_hidden_state[:, 0, :self._target_dim]
+            all_embeddings.append(cls_embeddings.cpu().numpy().astype(np.float32))
+
+        return np.vstack(all_embeddings)
 
     def _embed_onnx(self, texts: list[str], batch_size: int) -> np.ndarray:
-        """Embed using ONNX Runtime with lightweight tokenizers."""
+        """Embed using ONNX MiniLM with mean pooling + dimension truncation."""
         all_embeddings = []
-
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             encoded = self._tokenizer.encode_batch(batch)
@@ -361,85 +314,59 @@ class Embedder:
             attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
             token_type_ids = np.zeros_like(input_ids, dtype=np.int64)
 
-            feeds = {
+            outputs = self._onnx_session.run(None, {
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
                 "token_type_ids": token_type_ids,
-            }
+            })
 
-            outputs = self._onnx_session.run(None, feeds)
-            # outputs[0] is token_embeddings (batch, seq_len, hidden)
-            token_embeddings = outputs[0]
-            pooled = self._mean_pool_and_normalize(
-                token_embeddings, attention_mask.astype(np.float32)
-            )
-            all_embeddings.append(pooled)
+            token_embs = outputs[0]
+            mask_exp = attention_mask[:, :, np.newaxis].astype(np.float32)
+            pooled = np.sum(token_embs * mask_exp, axis=1) / np.clip(mask_exp.sum(axis=1), 1e-9, None)
+
+            # Truncate to target dim
+            if pooled.shape[1] > self._target_dim:
+                pooled = pooled[:, :self._target_dim]
+
+            # L2 normalize
+            norms = np.clip(np.linalg.norm(pooled, axis=1, keepdims=True), 1e-9, None)
+            all_embeddings.append((pooled / norms).astype(np.float32))
 
         return np.vstack(all_embeddings)
 
     def _embed_sentence_transformers(self, texts: list[str], batch_size: int) -> np.ndarray:
-        """Embed using sentence-transformers."""
-        embeddings = self._model.encode(
-            texts,
-            batch_size=batch_size,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-            normalize_embeddings=True,
-        )
-        return embeddings.astype(np.float32)
+        embs = self._model.encode(
+            texts, batch_size=batch_size, show_progress_bar=False,
+            convert_to_numpy=True, normalize_embeddings=True,
+        ).astype(np.float32)
+        if embs.shape[1] > self._target_dim:
+            embs = embs[:, :self._target_dim]
+            norms = np.clip(np.linalg.norm(embs, axis=1, keepdims=True), 1e-9, None)
+            embs = embs / norms
+        return embs
 
     def embed(self, texts: list[str], batch_size: int = 128) -> np.ndarray:
-        """Embed a list of text strings.
-
-        Applies Matryoshka dimension truncation when target_dim < model dim.
-
-        Args:
-            texts: List of text strings to embed.
-            batch_size: Number of texts to embed at once.
-
-        Returns:
-            numpy array of shape (len(texts), dimension).
-        """
+        """Embed a list of texts. Returns (N, dimension) float32 array."""
         if not texts:
             return np.array([], dtype=np.float32).reshape(0, self.dimension)
 
         self._ensure_loaded()
 
-        if self._backend == "onnx":
-            full = self._embed_onnx(texts, batch_size)
+        if self._backend == "starbucks":
+            return self._embed_starbucks(texts, batch_size)
+        elif self._backend == "onnx":
+            return self._embed_onnx(texts, batch_size)
         else:
-            full = self._embed_sentence_transformers(texts, batch_size)
-
-        return self._truncate_and_normalize(full)
+            return self._embed_sentence_transformers(texts, batch_size)
 
     def embed_with_cache(
-        self,
-        texts: list[str],
-        batch_size: int = 128,
-        keys: Optional[list[str]] = None,
+        self, texts: list[str], batch_size: int = 128, keys: Optional[list[str]] = None,
     ) -> np.ndarray:
-        """Embed texts with chunk-level LRU caching.
-
-        Identical chunks that were embedded in a previous call (or a previous
-        indexing run in this session) are returned from cache without hitting
-        ONNX inference.  This accelerates re-indexing of files with minor edits
-        where most chunks are unchanged.
-
-        Args:
-            texts: List of text strings to embed.
-            batch_size: ONNX inner batch size for uncached texts.
-            keys: Optional pre-computed SHA-256 hex digests (one per text).
-                  When omitted, SHA-256 of each text is computed here.
-
-        Returns:
-            numpy array of shape (len(texts), dimension).
-        """
+        """Embed with chunk-level LRU cache. Cache hits skip inference."""
         if not texts:
             return np.array([], dtype=np.float32).reshape(0, self.dimension)
 
-        dim = self.dimension  # ensures model loaded
-
-        # Compute cache keys
+        dim = self.dimension
         if keys is None:
             keys = [hashlib.sha256(t.encode("utf-8", errors="replace")).hexdigest() for t in texts]
 
@@ -459,14 +386,14 @@ class Embedder:
                     self._chunk_cache_misses += 1
 
         if miss_texts:
-            miss_embeddings = self.embed(miss_texts, batch_size=batch_size)
+            miss_embs = self.embed(miss_texts, batch_size=batch_size)
             with self._chunk_cache_lock:
-                for local_i, (global_i, key) in enumerate(zip(miss_indices, [keys[j] for j in miss_indices])):
-                    emb = miss_embeddings[local_i]
+                for local_i, global_i in enumerate(miss_indices):
+                    key = keys[global_i]
+                    emb = miss_embs[local_i]
                     result[global_i] = emb
                     self._chunk_cache[key] = emb
                     self._chunk_cache.move_to_end(key)
-                    # Evict oldest entries when over capacity
                     while len(self._chunk_cache) > self._CHUNK_CACHE_SIZE:
                         self._chunk_cache.popitem(last=False)
 
@@ -474,38 +401,26 @@ class Embedder:
 
     @property
     def chunk_cache_stats(self) -> dict:
-        """Return chunk cache hit/miss statistics."""
         total = self._chunk_cache_hits + self._chunk_cache_misses
-        hit_rate = self._chunk_cache_hits / total if total else 0.0
         return {
             "hits": self._chunk_cache_hits,
             "misses": self._chunk_cache_misses,
-            "hit_rate": hit_rate,
+            "hit_rate": self._chunk_cache_hits / total if total else 0.0,
             "size": len(self._chunk_cache),
         }
 
     def embed_query(self, query: str) -> np.ndarray:
-        """Embed a single query string, with LRU caching for repeated queries.
-
-        Repeated identical queries (e.g. paginated searches, retries) return
-        the cached embedding directly — no ONNX inference needed.
-
-        Returns:
-            1D numpy array of shape (dimension,).
-        """
-        # Fast path: return cached embedding if available.
+        """Embed a single query with LRU cache. Returns 1D array."""
         with self._query_cache_lock:
             if query in self._query_cache:
                 self._query_cache.move_to_end(query)
                 return self._query_cache[query].copy()
 
-        # Slow path: compute embedding, then cache it.
         result = self.embed([query])[0]
 
         with self._query_cache_lock:
             self._query_cache[query] = result
             self._query_cache.move_to_end(query)
-            # Evict oldest entry if over capacity.
             while len(self._query_cache) > self._QUERY_CACHE_SIZE:
                 self._query_cache.popitem(last=False)
 

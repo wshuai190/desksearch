@@ -109,7 +109,12 @@ class DeskSearch:
     def _get_embedder(self):
         if self._embedder is None:
             from desksearch.indexer.embedder import Embedder
-            self._embedder = Embedder(self._config.embedding_model)
+            self._config.resolve_starbucks_tier()
+            self._embedder = Embedder(
+                self._config.embedding_model,
+                embedding_dim=self._config.embedding_dim,
+                embedding_layers=self._config.embedding_layers,
+            )
         return self._embedder
 
     def _get_engine(self):

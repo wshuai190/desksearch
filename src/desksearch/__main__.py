@@ -138,7 +138,8 @@ def search(query: str, limit: int, file_type: str | None, as_json: bool) -> None
         store.close()
         return
 
-    embedder = Embedder(config.embedding_model)
+    config.resolve_starbucks_tier()
+    embedder = Embedder(config.embedding_model, embedding_dim=config.embedding_dim, embedding_layers=config.embedding_layers)
     engine = HybridSearchEngine(config)
 
     from desksearch.api.server import _warm_search_engine
@@ -797,10 +798,12 @@ def doctor(as_json: bool) -> None:
     # 4. Embedding model
     try:
         from desksearch.indexer.embedder import Embedder
-        embedder = Embedder(config.embedding_model)
+        config.resolve_starbucks_tier()
+        embedder = Embedder(config.embedding_model, embedding_dim=config.embedding_dim, embedding_layers=config.embedding_layers)
         vec = embedder.embed_query("test")
         ok = vec is not None and len(vec) > 0
-        _check(f"Embedding model ({config.embedding_model})", ok, f"dim={len(vec)}")
+        tier = config.search_speed
+        _check(f"Embedding model ({config.embedding_model}, {tier})", ok, f"dim={len(vec)}")
     except Exception as e:
         _check(f"Embedding model ({config.embedding_model})", False, str(e))
 

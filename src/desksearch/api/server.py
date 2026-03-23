@@ -64,9 +64,12 @@ def create_app(
 
     # Initialize core components — single instances shared across the app
     store = store or MetadataStore(config.data_dir / "metadata.db")
+    # Resolve Starbucks tier (updates config.embedding_dim and embedding_layers)
+    config.resolve_starbucks_tier()
     embedder = embedder or Embedder(
         config.embedding_model,
         embedding_dim=config.embedding_dim,
+        embedding_layers=config.embedding_layers,
     )
     engine = engine or HybridSearchEngine(
         config, dimension=config.embedding_dim,

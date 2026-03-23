@@ -422,7 +422,12 @@ class BackgroundService:
         from desksearch.indexer.store import MetadataStore
 
         self._store = MetadataStore(self.config.data_dir / "metadata.db")
-        self._embedder = Embedder(self.config.embedding_model)
+        self.config.resolve_starbucks_tier()
+        self._embedder = Embedder(
+            self.config.embedding_model,
+            embedding_dim=self.config.embedding_dim,
+            embedding_layers=self.config.embedding_layers,
+        )
         self._engine = HybridSearchEngine(self.config)
         self._pipeline = IndexingPipeline(
             self.config,

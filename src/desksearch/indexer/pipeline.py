@@ -149,9 +149,11 @@ class IndexingPipeline:
     ) -> None:
         self.config = config or Config()
         self.store = store or MetadataStore(self.config.data_dir / "metadata.db")
+        self.config.resolve_starbucks_tier()
         self.embedder = embedder or Embedder(
             self.config.embedding_model,
             embedding_dim=self.config.embedding_dim,
+            embedding_layers=self.config.embedding_layers,
         )
         self.search_engine = search_engine
         self._embeddings_path = self.config.data_dir / "embeddings"
