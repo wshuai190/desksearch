@@ -3,6 +3,9 @@
 Usage:
     desksearch                         # First run → onboarding; otherwise → serve
     desksearch setup                   # Re-run the onboarding wizard
+
+import os as _os
+_os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     desksearch add ~/my-folder         # Add a folder to watch + index it
     desksearch remove ~/old-folder     # Stop watching a folder
     desksearch serve [--host HOST] [--port PORT]

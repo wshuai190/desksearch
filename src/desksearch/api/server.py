@@ -12,7 +12,10 @@ from desksearch.indexer.embedder import Embedder
 from desksearch.indexer.pipeline import IndexingPipeline
 from desksearch.indexer.store import MetadataStore
 
-UI_DIST_DIR = Path(__file__).resolve().parent.parent.parent / "ui" / "dist"
+# Look for UI files: first in package (pip install), then in source tree (dev)
+_pkg_ui = Path(__file__).resolve().parent.parent / "ui_dist"
+_src_ui = Path(__file__).resolve().parent.parent.parent / "ui" / "dist"
+UI_DIST_DIR = _pkg_ui if _pkg_ui.exists() else _src_ui
 
 
 def create_app(
