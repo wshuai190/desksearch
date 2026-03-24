@@ -253,13 +253,21 @@ class Embedder:
         self._tokenizer = AutoTokenizer.from_pretrained(local_path)
 
         # Load only the layers we need (2, 4, or 6)
+        # Use ignore_mismatched_sizes to suppress UNEXPECTED key warnings
+        # when loading fewer layers than saved in the checkpoint
         config = AutoConfig.from_pretrained(
             local_path,
             num_hidden_layers=self._target_layers,
         )
+        import logging as _logging
+        # Temporarily suppress transformers model loading warnings
+        _tf_logger = _logging.getLogger("transformers.modeling_utils")
+        _prev_level = _tf_logger.level
+        _tf_logger.setLevel(_logging.ERROR)
         self._model = AutoModel.from_pretrained(
             local_path, config=config
         ).eval()
+        _tf_logger.setLevel(_prev_level)
 
         # Disable gradients for inference
         for param in self._model.parameters():

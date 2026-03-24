@@ -16,8 +16,8 @@ function formatLastIndexed(dateStr: string | null): string {
 
 function formatFileCount(n: number): string {
   if (n === 0) return 'No files indexed yet';
-  if (n === 1) return '1 file ready to search';
-  return `${n.toLocaleString()} files ready to search`;
+  if (n === 1) return '1 file ready';
+  return `${n.toLocaleString()} files ready`;
 }
 
 interface StatusBarProps {
@@ -26,23 +26,21 @@ interface StatusBarProps {
 }
 
 export default function StatusBar({ status, error }: StatusBarProps) {
-  // Error state — server is unreachable
+  // Error state
   if (error) {
     return (
       <>
-        {/* Desktop status bar */}
-        <div className="hidden sm:block fixed bottom-0 left-0 right-0 px-4 py-2.5 bg-red-50 dark:bg-red-950/40 border-t border-red-200 dark:border-red-900/50 z-10">
+        <div className="hidden sm:block fixed bottom-0 left-0 right-0 px-4 py-2 bg-red-50 dark:bg-red-950/40 border-t border-red-200 dark:border-red-900/50 z-10">
           <div className="max-w-5xl mx-auto flex items-center gap-2.5">
             <div className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
             <span className="text-xs text-red-600 dark:text-red-400 font-medium">
               DeskSearch isn't running
             </span>
             <span className="text-xs text-red-400 dark:text-red-500">
-              — Open the DeskSearch app and try again
+              &mdash; Open the DeskSearch app and try again
             </span>
           </div>
         </div>
-        {/* Mobile: inline banner above bottom nav */}
         <div className="sm:hidden mx-3 mb-1 px-3 py-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-lg flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
           <span className="text-xs text-red-600 dark:text-red-400">DeskSearch isn't running</span>
@@ -59,40 +57,37 @@ export default function StatusBar({ status, error }: StatusBarProps) {
 
   return (
     <>
-      {/* Desktop status bar — fixed at bottom */}
-      <div className="hidden sm:block fixed bottom-0 left-0 right-0 px-4 py-2 bg-white/90 dark:bg-dark-surface/90 backdrop-blur border-t border-gray-100 dark:border-dark-border z-10">
+      {/* Desktop status bar */}
+      <div className="hidden sm:block fixed bottom-0 left-0 right-0 px-4 py-2 bg-white/80 dark:bg-dark-surface/80 backdrop-blur-md border-t border-gray-100 dark:border-dark-border z-10">
         <div className="max-w-5xl mx-auto flex items-center justify-between text-xs">
           <div className="flex items-center gap-3">
-            {/* Status dot + label */}
             <div className="flex items-center gap-1.5">
               <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                isIndexing ? 'bg-amber-400 animate-pulse' : 'bg-green-500'
+                isIndexing ? 'bg-amber-400 animate-pulse' : 'bg-emerald-500'
               }`} />
               <span className={`font-medium ${
                 isIndexing
                   ? 'text-amber-600 dark:text-amber-400'
-                  : 'text-green-600 dark:text-green-400'
+                  : 'text-emerald-600 dark:text-emerald-400'
               }`}>
-                {isIndexing ? 'Reading files…' : formatFileCount(fileCount)}
+                {isIndexing ? 'Reading files...' : formatFileCount(fileCount)}
               </span>
             </div>
 
-            {/* Show count when indexing too */}
             {isIndexing && fileCount > 0 && (
-              <span className="text-gray-400 dark:text-gray-500">
+              <span className="text-gray-400 dark:text-gray-500 tabular-nums">
                 {fileCount.toLocaleString()} done so far
               </span>
             )}
           </div>
 
-          {/* Last updated */}
           {lastIndexed && !isIndexing && (
             <span className="text-gray-400 dark:text-gray-500">{lastIndexed}</span>
           )}
         </div>
       </div>
 
-      {/* Mobile: compact inline status (non-fixed, shown above bottom nav naturally) */}
+      {/* Mobile: compact inline status */}
       {(isIndexing || fileCount === 0) && (
         <div className="sm:hidden mx-3 mb-1 px-3 py-2 bg-white dark:bg-dark-surface border border-gray-100 dark:border-dark-border rounded-lg flex items-center gap-2">
           <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
@@ -100,8 +95,8 @@ export default function StatusBar({ status, error }: StatusBarProps) {
           }`} />
           <span className="text-xs text-gray-500 dark:text-gray-400">
             {isIndexing
-              ? `Reading your files… ${fileCount > 0 ? `${fileCount.toLocaleString()} done` : ''}`
-              : 'No files indexed yet — add a folder to get started'}
+              ? `Reading your files... ${fileCount > 0 ? `${fileCount.toLocaleString()} done` : ''}`
+              : 'No files indexed yet \u2014 add a folder to get started'}
           </span>
         </div>
       )}

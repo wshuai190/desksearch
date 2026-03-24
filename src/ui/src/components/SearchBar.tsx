@@ -31,12 +31,72 @@ const EXAMPLE_QUERIES = [
 ];
 
 function getExamples(): string[] {
-  // Pick 3 random examples, stable per session
-  const seed = Math.floor(Date.now() / 60000); // changes every minute
+  const seed = Math.floor(Date.now() / 60000);
   const shuffled = [...EXAMPLE_QUERIES].sort(() => {
     return Math.sin(seed * 9301 + EXAMPLE_QUERIES.indexOf(EXAMPLE_QUERIES[0])) - 0.5;
   });
   return shuffled.slice(0, 3);
+}
+
+// ── Quick stats shown on home screen ────────────────────────────────────────
+function QuickStats({ fileCount, lastIndexed, indexSizeMb }: { fileCount?: number; lastIndexed?: string | null; indexSizeMb?: number }) {
+  if (!fileCount || fileCount === 0) return null;
+
+  const formatLastIndexed = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return 'Never';
+    const date = new Date(dateStr);
+    const now = new Date();
+    const diffMin = Math.floor((now.getTime() - date.getTime()) / 60000);
+    if (diffMin < 1) return 'Just now';
+    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffHrs = Math.floor(diffMin / 60);
+    if (diffHrs < 24) return `${diffHrs}h ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  };
+
+  const stats = [
+    { label: 'Files indexed', value: fileCount.toLocaleString(), icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
+    { label: 'Last updated', value: formatLastIndexed(lastIndexed), icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+    ...(indexSizeMb && indexSizeMb > 0 ? [{ label: 'Index size', value: `${indexSizeMb.toFixed(1)} MB`, icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4' }] : []),
+  ];
+
+  return (
+    <div className="flex items-center justify-center gap-6 mt-6 animate-fadeIn" style={{ animationDelay: '100ms' }}>
+      {stats.map((s) => (
+        <div key={s.label} className="flex items-center gap-2 text-gray-400 dark:text-gray-500">
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d={s.icon} />
+          </svg>
+          <span className="text-xs">
+            <span className="font-medium text-gray-600 dark:text-gray-300">{s.value}</span>
+            {' '}<span className="hidden sm:inline">{s.label.toLowerCase()}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Search tips for home screen ─────────────────────────────────────────────
+function SearchTips() {
+  const tips = [
+    { icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346A3.5 3.5 0 0114.5 20.5H9.5a3.5 3.5 0 01-2.471-1.026l-.347-.346z', text: 'Search by meaning, not just keywords' },
+    { icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', text: 'Filter by date, file type, or folder' },
+    { icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z', text: 'Use voice search or press / to focus' },
+  ];
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-6 mt-6 animate-fadeIn" style={{ animationDelay: '200ms' }}>
+      {tips.map((tip, i) => (
+        <div key={i} className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
+          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
+            <path strokeLinecap="round" strokeLinejoin="round" d={tip.icon} />
+          </svg>
+          <span>{tip.text}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // ── Hero section shown above the search bar when centered ──────────────────
@@ -53,18 +113,25 @@ function CenteredHero({ fileCount, isIndexing, onExampleClick }: CenteredHeroPro
   const noFiles = fileCount !== undefined && fileCount === 0 && !isIndexing;
 
   return (
-    <div className="text-center mb-6 sm:mb-8 px-2">
+    <div className="text-center mb-8 sm:mb-10 px-2">
+      {/* Logo icon */}
+      <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-accent-blue to-blue-600 shadow-lg shadow-accent-blue/20 mb-5">
+        <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+      </div>
+
       {/* Title */}
-      <h1 className="text-3xl sm:text-4xl font-bold mb-2 sm:mb-3 bg-gradient-to-r from-accent-blue to-blue-400 bg-clip-text text-transparent">
-        <span role="img" aria-label="search">🔍</span> DeskSearch
+      <h1 className="text-3xl sm:text-4xl font-bold mb-2 text-gray-900 dark:text-gray-50 tracking-tight">
+        DeskSearch
       </h1>
 
       {/* Subtitle — context-aware */}
       {isIndexing && (
         <p className="text-gray-500 dark:text-gray-400 text-base sm:text-lg mb-4">
-          <span className="inline-flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse inline-block" />
-            Reading your files… you can already start searching!
+            Reading your files... you can already start searching!
           </span>
         </p>
       )}
@@ -83,23 +150,23 @@ function CenteredHero({ fileCount, isIndexing, onExampleClick }: CenteredHeroPro
       {!isIndexing && !noFiles && (
         <p className="text-gray-500 dark:text-gray-400 text-base sm:text-lg mb-4">
           {hasFiles
-            ? `Search through ${fileCount!.toLocaleString()} files by meaning, not just keywords`
+            ? `Search ${fileCount!.toLocaleString()} files by meaning`
             : 'Search your files by meaning, not just keywords'}
         </p>
       )}
 
       {/* Example queries — only show when there are files */}
       {hasFiles && !isIndexing && (
-        <div className="mt-4 sm:mt-5">
-          <p className="text-xs text-gray-400 dark:text-gray-500 mb-2 uppercase tracking-wide font-medium">
-            Try searching for…
+        <div className="mt-5 sm:mt-6">
+          <p className="text-[11px] text-gray-400 dark:text-gray-500 mb-2.5 uppercase tracking-widest font-medium">
+            Try searching for
           </p>
           <div className="flex flex-wrap justify-center gap-2">
             {examples.map((q) => (
               <button
                 key={q}
                 onClick={() => onExampleClick(q)}
-                className="tap-sm text-sm px-3 py-1.5 rounded-full border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-300 hover:border-accent-blue hover:text-accent-blue dark:hover:text-accent-blue hover:bg-accent-blue/5 transition-colors"
+                className="text-sm px-3.5 py-1.5 rounded-full border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-300 hover:border-accent-blue hover:text-accent-blue dark:hover:text-accent-blue hover:bg-accent-blue/5 transition-all duration-200"
               >
                 {q}
               </button>
@@ -119,6 +186,8 @@ interface SearchBarProps {
   onArrowDown?: () => void;
   fileCount?: number;
   isIndexing?: boolean;
+  lastIndexed?: string | null;
+  indexSizeMb?: number;
 }
 
 export interface SearchBarHandle {
@@ -126,7 +195,7 @@ export interface SearchBarHandle {
 }
 
 const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
-  ({ query, onQueryChange, centered, onArrowDown, fileCount, isIndexing }, ref) => {
+  ({ query, onQueryChange, centered, onArrowDown, fileCount, isIndexing, lastIndexed, indexSizeMb }, ref) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const [recentSearches, setRecentSearches] = useState<string[]>([]);
     const [showRecent, setShowRecent] = useState(false);
@@ -243,7 +312,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     return (
       <div
         ref={containerRef}
-        className={`w-full transition-all duration-500 relative ${centered ? 'max-w-2xl' : 'max-w-3xl'}`}
+        className={`w-full transition-all duration-500 relative ${centered ? 'max-w-xl' : 'max-w-3xl'}`}
       >
         {/* Hero section for centered/home view */}
         {centered && (
@@ -258,7 +327,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
         <div className="relative group">
           <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
             <svg
-              className="h-5 w-5 text-gray-400 group-focus-within:text-accent-blue transition-colors"
+              className="h-5 w-5 text-gray-400 group-focus-within:text-accent-blue transition-colors duration-200"
               fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
             >
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
@@ -282,12 +351,12 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             onKeyDown={handleInputKeyDown}
             onFocus={handleFocus}
             onBlur={handleBlur}
-            placeholder={isListening ? 'Listening…' : 'Search your files…'}
-            className={`w-full bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border
-              rounded-xl pl-12 text-gray-900 dark:text-gray-100
+            placeholder={isListening ? 'Listening...' : 'Search your files...'}
+            className={`search-input w-full bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border
+              rounded-2xl pl-12 text-gray-900 dark:text-gray-100
               placeholder-gray-400 dark:placeholder-gray-500
-              focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue
-              transition-all ${centered ? 'py-4 text-lg' : 'py-3 text-base'}
+              focus:outline-none focus:border-accent-blue/50
+              ${centered ? 'py-4 text-lg' : 'py-3 text-base'}
               ${hasSpeechRecognition ? 'pr-20' : 'pr-10'}`}
           />
 
@@ -296,12 +365,12 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             {hasSpeechRecognition && (
               <button
                 onClick={handleVoiceSearch}
-                className={`tap-sm p-1.5 rounded-lg transition-colors ${
+                className={`p-1.5 rounded-lg transition-all duration-200 ${
                   isListening
                     ? 'text-red-500 bg-red-50 dark:bg-red-900/20 animate-pulse'
                     : 'text-gray-400 hover:text-accent-blue hover:bg-gray-100 dark:hover:bg-dark-hover'
                 }`}
-                title={isListening ? 'Listening…' : 'Search by voice'}
+                title={isListening ? 'Listening...' : 'Search by voice'}
                 aria-label="Voice search"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -313,7 +382,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             {/* Keyboard hint (desktop only when empty) */}
             {!query && !isListening && (
               <div className="hidden sm:flex items-center gap-1">
-                <kbd className="text-xs text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded font-mono">⌘K</kbd>
+                <kbd className="text-[11px] text-gray-400 dark:text-gray-500 bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono border border-gray-200 dark:border-dark-border/50">⌘K</kbd>
               </div>
             )}
 
@@ -321,7 +390,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             {query && (
               <button
                 onClick={() => { onQueryChange(''); setShowRecent(true); inputRef.current?.focus(); }}
-                className="tap-sm p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors"
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors"
                 title="Clear (Esc)"
                 aria-label="Clear search"
               >
@@ -335,14 +404,14 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
 
         {/* Recent searches dropdown */}
         {showRecent && recentSearches.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1.5 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl shadow-lg z-30 overflow-hidden animate-slideDown">
-            <div className="px-4 py-2 text-xs text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-dark-border font-medium uppercase tracking-wide">
+          <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl shadow-lg z-30 overflow-hidden animate-slideDown">
+            <div className="px-4 py-2.5 text-[11px] text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-dark-border font-medium uppercase tracking-widest">
               Recent searches
             </div>
             {recentSearches.map((s) => (
               <button
                 key={s}
-                className="tap-sm w-full text-left px-4 py-3 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-dark-hover flex items-center gap-3 group/item"
+                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-dark-hover flex items-center gap-3 group/item transition-colors"
                 onMouseDown={(e) => {
                   e.preventDefault();
                   onQueryChange(s);
@@ -354,23 +423,32 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                 </svg>
                 <span className="flex-1 truncate">{s}</span>
                 <span
-                  className="opacity-0 group-hover/item:opacity-100 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-base leading-none px-1 transition-opacity tap-sm"
+                  className="opacity-0 group-hover/item:opacity-100 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-base leading-none px-1 transition-opacity"
                   onClick={(e) => clearRecentSearch(e, s)}
                   title="Remove"
                 >
-                  ×
+                  &times;
                 </span>
               </button>
             ))}
           </div>
         )}
 
-        {/* Keyboard hint below (desktop, centered only) */}
+        {/* Bottom info for centered view */}
         {centered && (
-          <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-3 hidden sm:block">
-            Press <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded font-mono">⌘K</kbd> or{' '}
-            <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded font-mono">/</kbd> to focus anytime
-          </p>
+          <>
+            {/* Keyboard hint */}
+            <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-3 hidden sm:block">
+              Press <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">⌘K</kbd> or{' '}
+              <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">/</kbd> to focus anytime
+            </p>
+
+            {/* Quick stats */}
+            <QuickStats fileCount={fileCount} lastIndexed={lastIndexed} indexSizeMb={indexSizeMb} />
+
+            {/* Search tips */}
+            <SearchTips />
+          </>
         )}
       </div>
     );

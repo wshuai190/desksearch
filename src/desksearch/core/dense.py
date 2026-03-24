@@ -199,35 +199,40 @@ class DenseIndex:
     # Index factory methods
     # ------------------------------------------------------------------
 
-    def _create_flat_index(self) -> faiss.IndexIDMap:
-        """Create a new flat (exact) inner-product index."""
+    def _create_flat_index(self) -> faiss.Index:
+        """Create a new flat (exact) inner-product index.
+        
+        Uses IndexIDMap2 which supports reconstruct() — required for
+        auto-upgrading Flat → HNSW when the corpus grows.
+        """
         inner = faiss.IndexFlatIP(self._dimension)
-        return faiss.IndexIDMap(inner)
+        return faiss.IndexIDMap2(inner)
 
-    def _create_hnsw_index(self) -> faiss.IndexIDMap:
+    def _create_hnsw_index(self) -> faiss.Index:
         """Create an HNSW index (no training, good for 1k-100k vectors).
 
         HNSW does not support ``remove_ids``, so we use soft deletion.
+        Uses IndexIDMap2 for reconstruct() support.
         """
         hnsw = faiss.IndexHNSWFlat(self._dimension, HNSW_M)
         hnsw.hnsw.efConstruction = HNSW_EF_CONSTRUCT
         hnsw.hnsw.efSearch = HNSW_EF_SEARCH
-        # IndexIDMap wraps it for explicit ID management
-        index = faiss.IndexIDMap(hnsw)
+        # IndexIDMap2 wraps it for explicit ID management + reconstruct support
+        index = faiss.IndexIDMap2(hnsw)
         logger.info(
             "Created HNSW index (M=%d, efConstruction=%d, efSearch=%d)",
             HNSW_M, HNSW_EF_CONSTRUCT, HNSW_EF_SEARCH,
         )
         return index
 
-    def _create_ivf_index(self, training_vectors: np.ndarray) -> faiss.IndexIDMap:
+    def _create_ivf_index(self, training_vectors: np.ndarray) -> faiss.Index:
         """Create an IVF index trained on the given vectors."""
         nlist = min(IVF_NLIST, max(1, len(training_vectors) // 40))
         quantizer = faiss.IndexFlatIP(self._dimension)
         ivf = faiss.IndexIVFFlat(quantizer, self._dimension, nlist, faiss.METRIC_INNER_PRODUCT)
         ivf.nprobe = IVF_NPROBE
         ivf.train(self._normalize(training_vectors))
-        index = faiss.IndexIDMap(ivf)
+        index = faiss.IndexIDMap2(ivf)
         logger.info("Created IVF index with nlist=%d, nprobe=%d", nlist, IVF_NPROBE)
         return index
 

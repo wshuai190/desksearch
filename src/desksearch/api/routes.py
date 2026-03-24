@@ -21,6 +21,8 @@ from desksearch.api.schemas import (
     DuplicatePair,
     DuplicatesResponse,
     ErrorResponse,
+    FavoriteEntry,
+    FavoritesResponse,
     FileInfo,
     FilePreview,
     FilesResponse,
@@ -29,9 +31,13 @@ from desksearch.api.schemas import (
     IndexRequest,
     IndexStatus,
     NLAnswer,
+    RecentOpenEntry,
+    RecentOpensResponse,
     RichPreview,
     RichSearchResponse,
     RichSearchResult,
+    SearchHistoryEntry,
+    SearchHistoryResponse,
     SearchResponse,
     SearchResult,
     SettingsResponse,
@@ -146,6 +152,8 @@ async def search(
     type: Optional[str] = Query(None, description="Filter by file type (e.g. pdf)"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
     rich: bool = Query(True, description="Include NL answers and related docs"),
+    sort_by: Optional[str] = Query(None, description="Sort by: relevance, date_modified, file_size, file_type"),
+    folder: Optional[str] = Query(None, description="Restrict results to a specific folder path"),
 ) -> RichSearchResponse:
     """Execute a hybrid search query against the index."""
     start = time.perf_counter()
@@ -247,6 +255,10 @@ async def search(
         if type and file_type != type:
             continue
 
+        # Folder filter: skip files not under the requested folder
+        if folder and not doc.path.startswith(folder):
+            continue
+
         # Use the highlighted snippet for richer display; fall back to raw text
         snippet = r.snippets[0].highlighted if r.snippets else chunk.text[:200]
         modified = datetime.fromtimestamp(doc.modified_time, tz=timezone.utc)
@@ -291,6 +303,18 @@ async def search(
         except Exception as exc:
             logger.debug("NL answer extraction failed: %s", exc)
 
+    # Apply sort_by if not default relevance ordering
+    if sort_by and sort_by != "relevance":
+        if sort_by == "date_modified":
+            results.sort(
+                key=lambda r: r.modified or datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True,
+            )
+        elif sort_by == "file_size":
+            results.sort(key=lambda r: r.file_size or 0, reverse=True)
+        elif sort_by == "file_type":
+            results.sort(key=lambda r: r.file_type)
+
     elapsed_ms = (time.perf_counter() - start) * 1000
 
     _SLOW_SEARCH_MS = 100
@@ -304,6 +328,13 @@ async def search(
     if _analytics:
         try:
             _analytics.record_search(q, result_count=len(results))
+        except Exception:
+            pass
+
+    # Record search in history (best-effort)
+    if _store:
+        try:
+            _store.add_search_history(q, result_count=len(results))
         except Exception:
             pass
 
@@ -1544,3 +1575,116 @@ async def onboarding_setup(request: dict) -> dict:
         "paths": valid_paths,
         "indexing_started": start_indexing,
     }
+
+
+# ---------------------------------------------------------------------------
+# Search History
+# ---------------------------------------------------------------------------
+
+
+@router.get("/search/history", response_model=SearchHistoryResponse)
+async def search_history(
+    limit: int = Query(50, ge=1, le=200, description="Max entries to return"),
+) -> SearchHistoryResponse:
+    """Return the most recent search queries."""
+    if _store is None:
+        return SearchHistoryResponse(entries=[])
+    rows = _store.get_search_history(limit=limit)
+    entries = [
+        SearchHistoryEntry(
+            query=r["query"],
+            result_count=r["result_count"],
+            searched_at=datetime.fromtimestamp(r["searched_at"], tz=timezone.utc),
+        )
+        for r in rows
+    ]
+    return SearchHistoryResponse(entries=entries)
+
+
+# ---------------------------------------------------------------------------
+# Favorites
+# ---------------------------------------------------------------------------
+
+
+@router.post("/favorites/{doc_id}")
+async def add_favorite(doc_id: int):
+    """Star/favorite a document."""
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Store not available")
+    doc = _store.get_document_by_id(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    added = _store.add_favorite(doc_id)
+    return {"status": "added" if added else "already_exists", "doc_id": doc_id}
+
+
+@router.delete("/favorites/{doc_id}")
+async def remove_favorite(doc_id: int):
+    """Unstar/unfavorite a document."""
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Store not available")
+    removed = _store.remove_favorite(doc_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Favorite not found")
+    return {"status": "removed", "doc_id": doc_id}
+
+
+@router.get("/favorites", response_model=FavoritesResponse)
+async def list_favorites() -> FavoritesResponse:
+    """List all favorited documents."""
+    if _store is None:
+        return FavoritesResponse(favorites=[])
+    rows = _store.get_favorites()
+    favorites = [
+        FavoriteEntry(
+            doc_id=r["doc_id"],
+            path=r["path"],
+            filename=r["filename"],
+            file_type=r["extension"].lstrip("."),
+            size=r["size"],
+            modified=datetime.fromtimestamp(r["modified_time"], tz=timezone.utc),
+            created_at=datetime.fromtimestamp(r["created_at"], tz=timezone.utc),
+        )
+        for r in rows
+    ]
+    return FavoritesResponse(favorites=favorites)
+
+
+# ---------------------------------------------------------------------------
+# Recent Opens
+# ---------------------------------------------------------------------------
+
+
+@router.post("/files/{doc_id}/open")
+async def track_file_open(doc_id: int):
+    """Record that a file was opened from search results."""
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Store not available")
+    doc = _store.get_document_by_id(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    _store.record_open(doc_id)
+    return {"status": "ok", "doc_id": doc_id}
+
+
+@router.get("/recent", response_model=RecentOpensResponse)
+async def recent_opens(
+    limit: int = Query(10, ge=1, le=50, description="Max entries"),
+) -> RecentOpensResponse:
+    """Return the most recently opened files."""
+    if _store is None:
+        return RecentOpensResponse(entries=[])
+    rows = _store.get_recent_opens(limit=limit)
+    entries = [
+        RecentOpenEntry(
+            doc_id=r["doc_id"],
+            path=r["path"],
+            filename=r["filename"],
+            file_type=r["extension"].lstrip("."),
+            size=r["size"],
+            modified=datetime.fromtimestamp(r["modified_time"], tz=timezone.utc),
+            opened_at=datetime.fromtimestamp(r["opened_at"], tz=timezone.utc),
+        )
+        for r in rows
+    ]
+    return RecentOpensResponse(entries=entries)

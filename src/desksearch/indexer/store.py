@@ -152,6 +152,34 @@ class MetadataStore:
             except sqlite3.OperationalError:
                 pass  # Column already exists
 
+            # Tables for search history, favorites, and recent opens.
+            self.conn.executescript("""
+                CREATE TABLE IF NOT EXISTS search_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query TEXT NOT NULL,
+                    result_count INTEGER NOT NULL DEFAULT 0,
+                    searched_at REAL NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS favorites (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id INTEGER NOT NULL UNIQUE,
+                    created_at REAL NOT NULL,
+                    FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS recent_opens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    doc_id INTEGER NOT NULL,
+                    opened_at REAL NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_search_history_time ON search_history(searched_at);
+                CREATE INDEX IF NOT EXISTS idx_favorites_doc ON favorites(doc_id);
+                CREATE INDEX IF NOT EXISTS idx_recent_opens_time ON recent_opens(opened_at);
+            """)
+            self.conn.commit()
+
     # ------------------------------------------------------------------
     # Indexing state management (crash recovery)
     # ------------------------------------------------------------------
@@ -458,6 +486,98 @@ class MetadataStore:
                 self.conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
             self.conn.commit()
         return len(ids)
+
+    # ------------------------------------------------------------------
+    # Search history
+    # ------------------------------------------------------------------
+
+    def add_search_history(self, query: str, result_count: int = 0) -> None:
+        """Record a search query in history."""
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT INTO search_history (query, result_count, searched_at) VALUES (?, ?, ?)",
+                (query, result_count, time.time()),
+            )
+            self.conn.commit()
+
+    def get_search_history(self, limit: int = 50) -> list[dict]:
+        """Return the most recent search queries."""
+        rows = self.conn.execute(
+            "SELECT query, result_count, searched_at FROM search_history ORDER BY searched_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # Favorites
+    # ------------------------------------------------------------------
+
+    def add_favorite(self, doc_id: int) -> bool:
+        """Add a document to favorites. Returns True if added, False if already exists."""
+        with self._write_lock:
+            try:
+                self.conn.execute(
+                    "INSERT INTO favorites (doc_id, created_at) VALUES (?, ?)",
+                    (doc_id, time.time()),
+                )
+                self.conn.commit()
+                return True
+            except sqlite3.IntegrityError:
+                return False
+
+    def remove_favorite(self, doc_id: int) -> bool:
+        """Remove a document from favorites. Returns True if removed."""
+        with self._write_lock:
+            cursor = self.conn.execute(
+                "DELETE FROM favorites WHERE doc_id = ?", (doc_id,),
+            )
+            self.conn.commit()
+            return cursor.rowcount > 0
+
+    def get_favorites(self) -> list[dict]:
+        """Return all favorited documents with their metadata."""
+        rows = self.conn.execute(
+            """SELECT f.doc_id, f.created_at, d.path, d.filename, d.extension,
+                      d.size, d.modified_time
+               FROM favorites f
+               JOIN documents d ON f.doc_id = d.id
+               ORDER BY f.created_at DESC""",
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def is_favorite(self, doc_id: int) -> bool:
+        """Check if a document is favorited."""
+        row = self.conn.execute(
+            "SELECT 1 FROM favorites WHERE doc_id = ?", (doc_id,),
+        ).fetchone()
+        return row is not None
+
+    # ------------------------------------------------------------------
+    # Recent opens
+    # ------------------------------------------------------------------
+
+    def record_open(self, doc_id: int) -> None:
+        """Record that a file was opened from search results."""
+        with self._write_lock:
+            self.conn.execute(
+                "INSERT INTO recent_opens (doc_id, opened_at) VALUES (?, ?)",
+                (doc_id, time.time()),
+            )
+            self.conn.commit()
+
+    def get_recent_opens(self, limit: int = 10) -> list[dict]:
+        """Return the most recently opened files (deduplicated, most recent first)."""
+        rows = self.conn.execute(
+            """SELECT r.doc_id, MAX(r.opened_at) as opened_at,
+                      d.path, d.filename, d.extension, d.size, d.modified_time
+               FROM recent_opens r
+               JOIN documents d ON r.doc_id = d.id
+               GROUP BY r.doc_id
+               ORDER BY opened_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     def ping(self) -> bool:
         """Return True if the database connection is healthy."""

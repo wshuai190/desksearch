@@ -265,3 +265,46 @@ class DuplicatesResponse(BaseModel):
     """Duplicate file detection results."""
     pairs: list[DuplicatePair] = Field(default_factory=list)
     total: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Search history, favorites, and recent opens
+# ---------------------------------------------------------------------------
+
+class SearchHistoryEntry(BaseModel):
+    """A single search history entry."""
+    query: str
+    result_count: int = 0
+    searched_at: datetime
+
+class SearchHistoryResponse(BaseModel):
+    """Search history listing."""
+    entries: list[SearchHistoryEntry] = Field(default_factory=list)
+
+class FavoriteEntry(BaseModel):
+    """A favorited file."""
+    doc_id: int
+    path: str
+    filename: str
+    file_type: str
+    size: int
+    modified: Optional[datetime] = None
+    created_at: datetime
+
+class FavoritesResponse(BaseModel):
+    """List of favorited files."""
+    favorites: list[FavoriteEntry] = Field(default_factory=list)
+
+class RecentOpenEntry(BaseModel):
+    """A recently opened file."""
+    doc_id: int
+    path: str
+    filename: str
+    file_type: str
+    size: int
+    modified: Optional[datetime] = None
+    opened_at: datetime
+
+class RecentOpensResponse(BaseModel):
+    """List of recently opened files."""
+    entries: list[RecentOpenEntry] = Field(default_factory=list)

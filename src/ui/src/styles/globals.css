@@ -5,8 +5,14 @@
 @layer base {
   body {
     @apply antialiased;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto,
       'Helvetica Neue', Arial, sans-serif;
+    letter-spacing: -0.011em;
+  }
+
+  /* Typography hierarchy */
+  h1, h2, h3, h4 {
+    letter-spacing: -0.02em;
   }
 
   ::-webkit-scrollbar {
@@ -23,8 +29,16 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #ccc;
+    background: #d4d4d8;
     border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #a1a1aa;
+  }
+
+  .dark ::-webkit-scrollbar-thumb:hover {
+    background: #555;
   }
 
   /* Safe-area insets for notched iPhones */
@@ -48,6 +62,40 @@
   .mobile-content-pb {
     padding-bottom: calc(4.5rem + var(--safe-area-inset-bottom));
   }
+
+  /* Skeleton shimmer effect */
+  .skeleton {
+    @apply relative overflow-hidden;
+    background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s ease-in-out infinite;
+  }
+
+  .dark .skeleton {
+    background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
+    background-size: 200% 100%;
+  }
+
+  /* Search input enhanced focus */
+  .search-input {
+    @apply transition-shadow duration-300;
+  }
+
+  .search-input:not(:focus) {
+    box-shadow: 0 2px 8px -2px rgba(0,0,0,0.08), 0 1px 2px -1px rgba(0,0,0,0.04);
+  }
+
+  .search-input:focus {
+    box-shadow: 0 0 0 1px rgba(59,130,246,0.3), 0 4px 16px -4px rgba(59,130,246,0.12), 0 2px 8px -2px rgba(0,0,0,0.06);
+  }
+
+  .dark .search-input:not(:focus) {
+    box-shadow: 0 2px 8px -2px rgba(0,0,0,0.3), 0 1px 2px -1px rgba(0,0,0,0.2);
+  }
+
+  .dark .search-input:focus {
+    box-shadow: 0 0 0 1px rgba(59,130,246,0.4), 0 4px 20px -4px rgba(59,130,246,0.2);
+  }
 }
 
 /* Override browser default <mark> yellow to use our themed highlight */
@@ -65,4 +113,18 @@ mark {
 /* Prevent pull-to-refresh on mobile when we handle it ourselves */
 html {
   overscroll-behavior-y: contain;
+}
+
+/* Smooth transitions for sidebar nav items */
+.nav-item {
+  @apply relative;
+}
+
+.nav-item::before {
+  content: '';
+  @apply absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-0 bg-accent-blue rounded-full transition-all duration-200;
+}
+
+.nav-item.active::before {
+  @apply h-4;
 }

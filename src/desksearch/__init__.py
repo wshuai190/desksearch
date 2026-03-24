@@ -16,7 +16,7 @@ Quick start::
     info = ds.info()
     print(info)  # {"documents": 1234, "chunks": 45678, ...}
 """
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from desksearch._sdk import DeskSearch, SearchResult
 
