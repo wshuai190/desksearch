@@ -40,10 +40,10 @@ Benchmarked on Apple Silicon with 50K documents and 64-dimensional embeddings (r
 
 | Metric | Value |
 |---|---|
-| Search latency p50 | **1.11 ms** |
-| Search latency p95 | **1.20 ms** |
+| Search latency p50 | **0.83 ms** |
+| Search latency p95 | **0.90 ms** |
 | FAISS raw search | **0.08 ms** |
-| Queries/sec | **896** |
+| Queries/sec | **1,193** |
 | Embedding model | Starbucks 2D Matryoshka (64d) |
 | Index size per 1K docs | ~3 MB |
 | Frontend bundle | ~92 KB gzip |
