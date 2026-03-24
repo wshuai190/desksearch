@@ -10,6 +10,7 @@ Loads only the needed layers via AutoConfig(num_hidden_layers=N) for real speedu
 
 Falls back to all-MiniLM-L6-v2 via ONNX if Starbucks model can't be loaded.
 """
+import atexit
 import gc
 import hashlib
 import logging
@@ -20,6 +21,40 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+
+# Global registry for atexit cleanup (prevents segfault from torch/FAISS at exit)
+_active_embedders: list["Embedder"] = []
+_atexit_registered = False
+
+
+def _cleanup_all_embedders():
+    """Unload all active embedders before Python's module cleanup.
+    
+    This prevents segfaults from conflicting C++ destructors in torch/FAISS
+    when Python shuts down and cleans up shared libraries in arbitrary order.
+    """
+    for emb in list(_active_embedders):
+        try:
+            with emb._lock:
+                # Cancel any pending timer
+                if emb._unload_timer is not None:
+                    emb._unload_timer.cancel()
+                    emb._unload_timer = None
+                # Force delete model references
+                emb._model = None
+                emb._tokenizer = None
+                emb._onnx_session = None
+        except Exception:
+            pass
+    _active_embedders.clear()
+    # Force garbage collection to clean up torch tensors before exit
+    gc.collect()
+    try:
+        import torch
+        if hasattr(torch, '_C') and hasattr(torch._C, '_cuda_clearCublasWorkspaces'):
+            torch._C._cuda_clearCublasWorkspaces()
+    except Exception:
+        pass
 
 from desksearch.config import DEFAULT_EMBEDDING_MODEL, STARBUCKS_TIERS
 
@@ -74,6 +109,7 @@ class Embedder:
         embedding_dim: int = 64,
         embedding_layers: int = 4,
     ) -> None:
+        global _atexit_registered
         self.model_name = model_name
         self.idle_timeout = idle_timeout
         self._target_dim = embedding_dim
@@ -95,6 +131,12 @@ class Embedder:
         self._chunk_cache_lock = threading.Lock()
         self._chunk_cache_hits: int = 0
         self._chunk_cache_misses: int = 0
+
+        # Register atexit cleanup to prevent segfaults from torch/FAISS at exit
+        _active_embedders.append(self)
+        if not _atexit_registered:
+            atexit.register(_cleanup_all_embedders)
+            _atexit_registered = True
 
     # ------------------------------------------------------------------
     # Model lifecycle

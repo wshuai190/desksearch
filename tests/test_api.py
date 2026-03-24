@@ -4,13 +4,17 @@ from httpx import ASGITransport, AsyncClient
 
 from desksearch.api.server import create_app
 from desksearch.config import Config
+from desksearch.indexer.embedder import Embedder
+from tests.conftest_api import MockEmbedder
 
 
 @pytest.fixture()
 def app(tmp_path):
-    """Create a test application with an isolated data directory."""
-    config = Config(data_dir=tmp_path / "data")
-    return create_app(config)
+    """Create a test application with an isolated data directory and mock embedder."""
+    config = Config(data_dir=tmp_path / "data", index_paths=[])
+    config.resolve_starbucks_tier()
+    embedder = MockEmbedder(embedding_dim=config.embedding_dim)
+    return create_app(config, embedder=embedder)
 
 
 @pytest.fixture()

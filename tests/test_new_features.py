@@ -12,6 +12,7 @@ from httpx import ASGITransport, AsyncClient
 
 from desksearch.api.server import create_app
 from desksearch.config import Config
+from tests.conftest_api import MockEmbedder
 
 
 # ---------------------------------------------------------------------------
@@ -23,8 +24,10 @@ DIM = 32
 
 @pytest.fixture()
 def app(tmp_path):
-    config = Config(data_dir=tmp_path / "data")
-    return create_app(config)
+    config = Config(data_dir=tmp_path / "data", index_paths=[])
+    config.resolve_starbucks_tier()
+    embedder = MockEmbedder(embedding_dim=config.embedding_dim)
+    return create_app(config, embedder=embedder)
 
 
 @pytest.fixture()

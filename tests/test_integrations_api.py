@@ -23,31 +23,36 @@ from httpx import ASGITransport, AsyncClient
 
 from desksearch.api.server import create_app
 from desksearch.config import Config
+from tests.conftest_api import MockEmbedder
 
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
+def _make_app(config):
+    config.resolve_starbucks_tier()
+    embedder = MockEmbedder(embedding_dim=config.embedding_dim)
+    return create_app(config, embedder=embedder)
+
+
 @pytest.fixture()
 def app(tmp_path):
-    config = Config(data_dir=tmp_path / "data")
-    return create_app(config)
+    return _make_app(Config(data_dir=tmp_path / "data", index_paths=[]))
 
 
 @pytest.fixture()
 def app_with_key(tmp_path):
-    config = Config(data_dir=tmp_path / "data", api_key="test-secret-key")
-    return create_app(config)
+    return _make_app(Config(data_dir=tmp_path / "data", index_paths=[], api_key="test-secret-key"))
 
 
 @pytest.fixture()
 def app_with_webhooks(tmp_path):
-    config = Config(
+    return _make_app(Config(
         data_dir=tmp_path / "data",
+        index_paths=[],
         webhook_urls=["https://example.com/hook"],
-    )
-    return create_app(config)
+    ))
 
 
 @pytest.fixture()
