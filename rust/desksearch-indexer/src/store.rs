@@ -69,31 +69,34 @@ impl MetadataStore {
     }
 
     fn init_schema(&self) -> Result<()> {
+        // Schema compatible with existing Python DeskSearch database.
+        // Uses `documents` table (not `files`) and `doc_id` (not `file_id`).
         self.conn.execute_batch(
             "
-            CREATE TABLE IF NOT EXISTS files (
+            CREATE TABLE IF NOT EXISTS documents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 path TEXT NOT NULL UNIQUE,
                 filename TEXT NOT NULL,
                 extension TEXT NOT NULL DEFAULT '',
-                size_bytes INTEGER NOT NULL DEFAULT 0,
-                content_hash TEXT NOT NULL DEFAULT '',
-                modified_at TEXT NOT NULL DEFAULT '',
-                indexed_at TEXT NOT NULL DEFAULT (datetime('now')),
-                chunk_count INTEGER NOT NULL DEFAULT 0
+                size INTEGER NOT NULL DEFAULT 0,
+                modified_time REAL NOT NULL DEFAULT 0,
+                indexed_time REAL NOT NULL DEFAULT 0,
+                num_chunks INTEGER NOT NULL DEFAULT 0,
+                indexing_state TEXT NOT NULL DEFAULT 'done',
+                content_hash TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS chunks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-                chunk_index INTEGER NOT NULL,
+                doc_id INTEGER NOT NULL,
                 text TEXT NOT NULL,
-                char_offset INTEGER NOT NULL DEFAULT 0
+                chunk_index INTEGER NOT NULL,
+                char_offset INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (doc_id) REFERENCES documents(id) ON DELETE CASCADE
             );
 
-            CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
-            CREATE INDEX IF NOT EXISTS idx_files_hash ON files(content_hash);
-            CREATE INDEX IF NOT EXISTS idx_chunks_file_id ON chunks(file_id);
+            CREATE INDEX IF NOT EXISTS idx_documents_path ON documents(path);
+            CREATE INDEX IF NOT EXISTS idx_chunks_doc_id ON chunks(doc_id);
             ",
         )?;
         Ok(())
@@ -107,19 +110,24 @@ impl MetadataStore {
         extension: &str,
         size_bytes: i64,
         content_hash: &str,
-        modified_at: &str,
+        modified_time: f64,
     ) -> Result<i64> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64();
+
         self.conn.execute(
-            "INSERT INTO files (path, filename, extension, size_bytes, content_hash, modified_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO documents (path, filename, extension, size, content_hash, modified_time, indexed_time)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(path) DO UPDATE SET
                 filename = excluded.filename,
                 extension = excluded.extension,
-                size_bytes = excluded.size_bytes,
+                size = excluded.size,
                 content_hash = excluded.content_hash,
-                modified_at = excluded.modified_at,
-                indexed_at = datetime('now')",
-            params![path, filename, extension, size_bytes, content_hash, modified_at],
+                modified_time = excluded.modified_time,
+                indexed_time = excluded.indexed_time",
+            params![path, filename, extension, size_bytes, content_hash, modified_time, now],
         )?;
 
         Ok(self.conn.last_insert_rowid())
@@ -128,29 +136,29 @@ impl MetadataStore {
     /// Insert a chunk record. Returns the chunk ID.
     pub fn insert_chunk(
         &self,
-        file_id: i64,
+        doc_id: i64,
         chunk_index: i64,
         text: &str,
         char_offset: i64,
     ) -> Result<i64> {
         self.conn.execute(
-            "INSERT INTO chunks (file_id, chunk_index, text, char_offset) VALUES (?1, ?2, ?3, ?4)",
-            params![file_id, chunk_index, text, char_offset],
+            "INSERT INTO chunks (doc_id, chunk_index, text, char_offset) VALUES (?1, ?2, ?3, ?4)",
+            params![doc_id, chunk_index, text, char_offset],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
-    /// Delete all chunks for a file.
-    pub fn delete_chunks_for_file(&self, file_id: i64) -> Result<()> {
+    /// Delete all chunks for a document.
+    pub fn delete_chunks_for_doc(&self, doc_id: i64) -> Result<()> {
         self.conn
-            .execute("DELETE FROM chunks WHERE file_id = ?1", params![file_id])?;
+            .execute("DELETE FROM chunks WHERE doc_id = ?1", params![doc_id])?;
         Ok(())
     }
 
-    /// Delete a file and its chunks.
+    /// Delete a document and its chunks.
     pub fn delete_file(&self, path: &str) -> Result<()> {
         self.conn
-            .execute("DELETE FROM files WHERE path = ?1", params![path])?;
+            .execute("DELETE FROM documents WHERE path = ?1", params![path])?;
         Ok(())
     }
 
@@ -158,7 +166,7 @@ impl MetadataStore {
     pub fn get_file(&self, path: &str) -> Result<Option<FileMeta>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT id, path, filename, extension, size_bytes, content_hash, modified_at, indexed_at, chunk_count FROM files WHERE path = ?1")?;
+            .prepare("SELECT id, path, filename, extension, size, content_hash, modified_time, indexed_time, num_chunks FROM documents WHERE path = ?1")?;
 
         let result = stmt
             .query_row(params![path], |row| {
@@ -169,8 +177,8 @@ impl MetadataStore {
                     extension: row.get(3)?,
                     size_bytes: row.get(4)?,
                     content_hash: row.get(5)?,
-                    modified_at: row.get(6)?,
-                    indexed_at: row.get(7)?,
+                    modified_at: row.get::<_, f64>(6)?.to_string(),
+                    indexed_at: row.get::<_, f64>(7)?.to_string(),
                     chunk_count: row.get(8)?,
                 })
             })
@@ -191,7 +199,7 @@ impl MetadataStore {
     pub fn file_count(&self) -> Result<i64> {
         let count: i64 = self
             .conn
-            .query_row("SELECT COUNT(*) FROM files", [], |row| row.get(0))?;
+            .query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
         Ok(count)
     }
 
@@ -221,7 +229,7 @@ impl MetadataStore {
         let result: Option<String> = self
             .conn
             .query_row(
-                "SELECT f.path FROM files f JOIN chunks c ON c.file_id = f.id WHERE c.id = ?1",
+                "SELECT d.path FROM documents d JOIN chunks c ON c.doc_id = d.id WHERE c.id = ?1",
                 params![chunk_id],
                 |row| row.get(0),
             )
@@ -247,7 +255,7 @@ mod tests {
             "txt",
             1024,
             "abc123",
-            "2026-03-25",
+            1711324800.0,
         )?;
         assert!(file_id > 0);
 
@@ -270,7 +278,7 @@ mod tests {
 
         assert!(store.needs_reindex("/tmp/test.txt", "hash1")?);
 
-        store.upsert_file("/tmp/test.txt", "test.txt", "txt", 100, "hash1", "2026-03-25")?;
+        store.upsert_file("/tmp/test.txt", "test.txt", "txt", 100, "hash1", 1711324800.0)?;
 
         assert!(!store.needs_reindex("/tmp/test.txt", "hash1")?);
         assert!(store.needs_reindex("/tmp/test.txt", "hash2")?);
@@ -282,7 +290,7 @@ mod tests {
     fn test_delete_file() -> Result<()> {
         let store = MetadataStore::open_memory()?;
 
-        let file_id = store.upsert_file("/tmp/test.txt", "test.txt", "txt", 100, "h", "d")?;
+        let file_id = store.upsert_file("/tmp/test.txt", "test.txt", "txt", 100, "h", 0.0)?;
         store.insert_chunk(file_id, 0, "chunk1", 0)?;
         store.insert_chunk(file_id, 1, "chunk2", 100)?;
 
