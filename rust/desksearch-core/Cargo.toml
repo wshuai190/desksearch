@@ -1,0 +1,27 @@
+[package]
+name = "desksearch-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Core search engine for DeskSearch — BM25, dense, fusion, snippets"
+
+[dependencies]
+tantivy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+rayon.workspace = true
+rusqlite.workspace = true
+
+# Dense vector search
+# usearch.workspace = true  # enable when ready
+
+# Snippet extraction
+regex = "1"
+aho-corasick = "1"
+
+[dev-dependencies]
+tempfile = "3"

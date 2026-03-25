@@ -1,0 +1,39 @@
+[package]
+name = "desksearch-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "HTTP server for DeskSearch — axum-based, serves search API + UI"
+
+[[bin]]
+name = "desksearch"
+path = "src/main.rs"
+
+[dependencies]
+desksearch-core.workspace = true
+desksearch-indexer.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+
+# HTTP server
+axum = { version = "0.8", features = ["json"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Home directory
+dirs-next = "2"
+
+# Time
+chrono = "0.4"
+
+[dev-dependencies]
+reqwest = { version = "0.12", features = ["json"] }
+tempfile = "3"

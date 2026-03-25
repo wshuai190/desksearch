@@ -1,0 +1,36 @@
+[package]
+name = "desksearch-indexer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "File parsing, chunking, and indexing pipeline for DeskSearch"
+
+[dependencies]
+desksearch-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+rayon.workspace = true
+rusqlite.workspace = true
+
+# File walking
+ignore = "0.4"
+walkdir = "2"
+
+# File watching
+notify = "7"
+
+# Parsing
+scraper = "0.22"
+
+# Hashing for change detection
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
