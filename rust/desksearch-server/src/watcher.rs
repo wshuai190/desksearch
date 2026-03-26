@@ -120,11 +120,20 @@ fn reindex_files(state: &AppState, paths: &[PathBuf]) {
 
     for file_path in paths {
         if !file_path.is_file() {
-            // File was deleted — remove from index
+            // File was deleted — remove from all indices
             let path_str = file_path.to_string_lossy();
+            let store = state.store.lock().unwrap();
+            // Remove old vectors for this file's chunks
+            if let Ok(old_chunk_ids) = store.get_chunk_ids_for_file(&path_str) {
+                let engine = state.search.read().unwrap();
+                for cid in &old_chunk_ids {
+                    let _ = engine.remove_vector(*cid as u64);
+                }
+            }
+            store.delete_file(&path_str).ok();
+            drop(store);
             let engine = state.search.read().unwrap();
             engine.bm25().delete_by_path(&mut bm25_writer, &path_str);
-            // TODO: also remove from metadata store and vector index
             continue;
         }
 
@@ -163,6 +172,14 @@ fn reindex_files(state: &AppState, paths: &[PathBuf]) {
 
         if !store.needs_reindex(&path_str, &content_hash).unwrap_or(true) {
             continue;
+        }
+
+        // Remove old vectors for this file's chunks before re-indexing
+        if let Ok(old_chunk_ids) = store.get_chunk_ids_for_file(&path_str) {
+            let engine = state.search.read().unwrap();
+            for cid in &old_chunk_ids {
+                let _ = engine.remove_vector(*cid as u64);
+            }
         }
 
         let doc_id = match store.upsert_file(&path_str, &file_name, &extension, size_bytes, &content_hash, modified_time) {

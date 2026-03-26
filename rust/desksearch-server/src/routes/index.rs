@@ -227,11 +227,15 @@ async fn clear_handler(
     })?;
     drop(engine);
 
-    // TODO: MetadataStore doesn't have a clear_all() method yet.
-    // For now, we clear the BM25 index. Metadata will be stale but
-    // needs_reindex() will trigger re-indexing since content hashes won't match.
+    // Clear metadata store (documents + chunks)
+    {
+        let store = state.store.lock().unwrap();
+        store.clear_all().map_err(|e| {
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Metadata clear failed: {e}"))
+        })?;
+    }
 
-    info!("BM25 index cleared");
+    info!("Index fully cleared (BM25 + metadata)");
     Ok(Json(serde_json::json!({ "status": "cleared" })))
 }
 

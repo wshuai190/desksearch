@@ -236,6 +236,26 @@ impl MetadataStore {
             .optional()?;
         Ok(result)
     }
+
+    /// Get all chunk IDs for a file path.
+    pub fn get_chunk_ids_for_file(&self, path: &str) -> Result<Vec<i64>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id FROM chunks c JOIN documents d ON c.doc_id = d.id WHERE d.path = ?1",
+        )?;
+        let ids = stmt
+            .query_map(params![path], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<i64>, _>>()?;
+        Ok(ids)
+    }
+
+    /// Delete all documents and chunks (clear the entire index).
+    pub fn clear_all(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "DELETE FROM chunks; DELETE FROM documents;",
+        )?;
+        info!("Cleared all documents and chunks from metadata store");
+        Ok(())
+    }
 }
 
 // Bring in rusqlite's OptionalExtension
@@ -300,6 +320,67 @@ mod tests {
         assert_eq!(store.file_count()?, 0);
         // Chunks should be cascade-deleted
         assert_eq!(store.chunk_count()?, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_clear_all() -> Result<()> {
+        let store = MetadataStore::open_memory()?;
+
+        let id1 = store.upsert_file("/tmp/a.txt", "a.txt", "txt", 10, "h1", 0.0)?;
+        store.insert_chunk(id1, 0, "chunk a", 0)?;
+        let id2 = store.upsert_file("/tmp/b.txt", "b.txt", "txt", 20, "h2", 0.0)?;
+        store.insert_chunk(id2, 0, "chunk b", 0)?;
+
+        assert_eq!(store.file_count()?, 2);
+        assert_eq!(store.chunk_count()?, 2);
+
+        store.clear_all()?;
+
+        assert_eq!(store.file_count()?, 0);
+        assert_eq!(store.chunk_count()?, 0);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_chunk_ids_for_file() -> Result<()> {
+        let store = MetadataStore::open_memory()?;
+
+        let id1 = store.upsert_file("/tmp/a.txt", "a.txt", "txt", 10, "h1", 0.0)?;
+        let c1 = store.insert_chunk(id1, 0, "chunk 1", 0)?;
+        let c2 = store.insert_chunk(id1, 1, "chunk 2", 100)?;
+
+        let id2 = store.upsert_file("/tmp/b.txt", "b.txt", "txt", 20, "h2", 0.0)?;
+        let c3 = store.insert_chunk(id2, 0, "chunk 3", 0)?;
+
+        let ids = store.get_chunk_ids_for_file("/tmp/a.txt")?;
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&c1));
+        assert!(ids.contains(&c2));
+
+        let ids_b = store.get_chunk_ids_for_file("/tmp/b.txt")?;
+        assert_eq!(ids_b, vec![c3]);
+
+        let ids_none = store.get_chunk_ids_for_file("/tmp/nonexistent.txt")?;
+        assert!(ids_none.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_file_path_for_chunk() -> Result<()> {
+        let store = MetadataStore::open_memory()?;
+
+        let file_id = store.upsert_file("/tmp/doc.pdf", "doc.pdf", "pdf", 500, "hash", 0.0)?;
+        let chunk_id = store.insert_chunk(file_id, 0, "some text", 0)?;
+
+        let path = store.get_file_path_for_chunk(chunk_id)?;
+        assert_eq!(path, Some("/tmp/doc.pdf".to_string()));
+
+        let missing = store.get_file_path_for_chunk(9999)?;
+        assert!(missing.is_none());
 
         Ok(())
     }

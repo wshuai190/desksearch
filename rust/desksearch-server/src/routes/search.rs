@@ -85,11 +85,30 @@ async fn search_handler(
     let enriched: Vec<EnrichedResult> = results
         .into_iter()
         .map(|r| {
-            let file_meta = store.get_file(&r.file_path).ok().flatten();
+            // Resolve file_path from metadata store when dense-only results lack it
+            let file_path = if r.file_path.is_empty() {
+                store
+                    .get_file_path_for_chunk(r.chunk_id as i64)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default()
+            } else {
+                r.file_path.clone()
+            };
+            let file_name = if file_path.is_empty() {
+                r.file_name.clone()
+            } else {
+                file_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("")
+                    .to_string()
+            };
+            let file_meta = store.get_file(&file_path).ok().flatten();
             EnrichedResult {
                 doc_id: r.chunk_id,
-                path: r.file_path.clone(),
-                filename: r.file_name.clone(),
+                path: file_path,
+                filename: file_name,
                 snippet: r.snippet.plain,
                 score: r.score,
                 file_type: file_meta
