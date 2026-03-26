@@ -1,5 +1,6 @@
 //! API route handlers.
 
+mod dashboard;
 mod folders;
 mod health;
 mod index;
@@ -20,5 +21,6 @@ pub fn api_router(state: Arc<AppState>) -> Router {
         .merge(index::router())
         .merge(folders::router())
         .merge(settings::router())
+        .merge(dashboard::router())
         .with_state(state)
 }

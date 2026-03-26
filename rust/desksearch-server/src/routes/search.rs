@@ -8,6 +8,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::state::AppState;
 use desksearch_core::SearchQuery;
@@ -50,6 +51,22 @@ async fn search_handler(
 ) -> Json<SearchResponse> {
     let start = std::time::Instant::now();
 
+    // Embed query if embed_client is available
+    let query_embedding = if let Some(ref embed_client) = state.embed_client {
+        match embed_client.lock() {
+            Ok(mut client) => match client.embed_query(&req.query) {
+                Ok(embedding) => Some(embedding),
+                Err(e) => {
+                    warn!("Query embedding failed: {e}, falling back to BM25-only");
+                    None
+                }
+            },
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
     let query = SearchQuery {
         text: req.query,
         top_k: Some(req.top_k),
@@ -59,7 +76,9 @@ async fn search_handler(
 
     let results = {
         let engine = state.search.read().unwrap();
-        engine.search(&query).unwrap_or_default()
+        engine
+            .search(&query, query_embedding.as_deref())
+            .unwrap_or_default()
     };
 
     let store = state.store.lock().unwrap();

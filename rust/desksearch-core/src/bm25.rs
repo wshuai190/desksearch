@@ -22,6 +22,8 @@ pub struct BM25Result {
     pub score: f32,
     /// The text content of the chunk (for snippet extraction).
     pub text: String,
+    /// The file path this chunk belongs to.
+    pub path: String,
 }
 
 /// BM25 search index backed by tantivy.
@@ -134,10 +136,17 @@ impl BM25Index {
                 .unwrap_or("")
                 .to_string();
 
+            let path = doc
+                .get_first(self.path_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
             results.push(BM25Result {
                 doc_id,
                 score,
                 text,
+                path,
             });
         }
 

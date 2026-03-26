@@ -37,6 +37,13 @@ chrono = "0.4"
 # URL handling
 urlencoding = "2"
 
+# Embedded frontend
+rust-embed.workspace = true
+mime_guess.workspace = true
+
+# File watching
+notify.workspace = true
+
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json"] }
 tempfile = "3"

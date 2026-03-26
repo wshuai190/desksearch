@@ -6,7 +6,7 @@ use std::time::Instant;
 use axum::{
     extract::State,
     http::StatusCode,
-    routing::post,
+    routing::{delete, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,8 @@ use desksearch_indexer::{ChunkerConfig, FileWalker};
 use desksearch_indexer::parsers;
 
 use crate::state::AppState;
+
+const EMBED_BATCH_SIZE: usize = 32;
 
 #[derive(Debug, Deserialize)]
 pub struct IndexRequest {
@@ -60,6 +62,10 @@ async fn index_handler(
     let mut bm25_writer = bm25_writer.map_err(|e| {
         (StatusCode::INTERNAL_SERVER_ERROR, format!("BM25 writer failed: {e}"))
     })?;
+
+    // Collect pending embeddings for batch processing
+    let mut pending_embed_texts: Vec<String> = Vec::new();
+    let mut pending_embed_ids: Vec<u64> = Vec::new();
 
     for file_path in &walk_result.files {
         let path_str = file_path.to_string_lossy();
@@ -130,18 +136,42 @@ async fn index_handler(
                 .bm25()
                 .add_chunk(&mut bm25_writer, chunk_id as u64, &chunk.text, &path_str)
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("BM25 add failed: {e}")))?;
+
+            // Queue for embedding if embed_client is available
+            if state.embed_client.is_some() {
+                pending_embed_texts.push(chunk.text.clone());
+                pending_embed_ids.push(chunk_id as u64);
+            }
         }
 
         drop(engine);
         drop(store);
 
+        // Flush embedding batch if full
+        if pending_embed_texts.len() >= EMBED_BATCH_SIZE {
+            flush_embeddings(&state, &mut pending_embed_texts, &mut pending_embed_ids);
+        }
+
         indexed += 1;
+    }
+
+    // Flush remaining embeddings
+    if !pending_embed_texts.is_empty() {
+        flush_embeddings(&state, &mut pending_embed_texts, &mut pending_embed_ids);
     }
 
     // Commit BM25 writer
     bm25_writer.commit().map_err(|e| {
         (StatusCode::INTERNAL_SERVER_ERROR, format!("BM25 commit failed: {e}"))
     })?;
+
+    // Save vectors if we embedded anything
+    {
+        let engine = state.search.read().unwrap();
+        if engine.has_dense() {
+            let _ = engine.save_vectors();
+        }
+    }
 
     let elapsed_ms = start.elapsed().as_millis() as u64;
     info!("Indexed {indexed} files ({skipped} skipped) in {elapsed_ms}ms");
@@ -153,6 +183,58 @@ async fn index_handler(
     }))
 }
 
+/// Flush pending embeddings: embed in batch and add vectors to search engine.
+fn flush_embeddings(
+    state: &AppState,
+    texts: &mut Vec<String>,
+    ids: &mut Vec<u64>,
+) {
+    if let Some(ref embed_client) = state.embed_client {
+        if let Ok(mut client) = embed_client.lock() {
+            match client.embed(texts) {
+                Ok(embeddings) => {
+                    let engine = state.search.read().unwrap();
+                    for (chunk_id, embedding) in ids.iter().zip(embeddings.iter()) {
+                        if let Err(e) = engine.add_vector(*chunk_id, embedding) {
+                            warn!("Failed to add vector for chunk {chunk_id}: {e}");
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Batch embedding failed: {e}");
+                }
+            }
+        }
+    }
+    texts.clear();
+    ids.clear();
+}
+
+/// Clear all indexed data.
+async fn clear_handler(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Clear BM25 index
+    let engine = state.search.read().unwrap();
+    let mut writer = engine.bm25().writer(50).map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("BM25 writer failed: {e}"))
+    })?;
+    writer.delete_all_documents().map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("Delete all failed: {e}"))
+    })?;
+    writer.commit().map_err(|e| {
+        (StatusCode::INTERNAL_SERVER_ERROR, format!("Commit failed: {e}"))
+    })?;
+    drop(engine);
+
+    // TODO: MetadataStore doesn't have a clear_all() method yet.
+    // For now, we clear the BM25 index. Metadata will be stale but
+    // needs_reindex() will trigger re-indexing since content hashes won't match.
+
+    info!("BM25 index cleared");
+    Ok(Json(serde_json::json!({ "status": "cleared" })))
+}
+
 /// Simple hash for content deduplication (not cryptographic).
 fn md5_hash(data: &[u8]) -> u64 {
     use std::hash::{Hash, Hasher};
@@ -162,5 +244,7 @@ fn md5_hash(data: &[u8]) -> u64 {
 }
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/index", post(index_handler))
+    Router::new()
+        .route("/index", post(index_handler))
+        .route("/index/clear", delete(clear_handler))
 }
