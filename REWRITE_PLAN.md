@@ -45,22 +45,40 @@ Binary: 7.1MB. Compiles clean.
 - Code files: already handled by text parser, but add language detection
 - Archives (.zip/.tar): extract and parse inner files (max 100 files, 50KB each)
 
-## Phase 2: Embedding Integration (1:00–2:00am) — 2 agents
-### Agent 2a: Python Subprocess for Embedding
-- Spawn a Python subprocess that loads the Starbucks model
-- Communicate via stdin/stdout JSON-lines protocol:
-  - Request: `{"texts": ["chunk1", "chunk2", ...], "tier": "regular"}`
-  - Response: `{"embeddings": [[0.1, 0.2, ...], ...]}`
-- Connection pooling: keep subprocess alive, reuse for batches
-- Timeout: kill and restart if no response in 30s
-- Create `scripts/embed_server.py` — standalone Python embedding worker
+## Phase 2: ONNX-Native Embedding — Kill the Python Dependency (1:00–2:00am) — 2 agents
+The Python subprocess is the bottleneck and the last external dependency. Replace it.
 
-### Agent 2b: Vector Search with usearch
-- Wire up usearch crate for approximate nearest neighbor
-- HNSW index with configurable M and efSearch
-- Support add, remove, search operations
-- Save/load index to disk (~/.desksearch/vectors.usearch)
-- Integrate into the search pipeline alongside tantivy BM25
+### Agent 2a: Export Starbucks to ONNX + Integrate via `ort` Crate
+- Write a Python script to export the 2/4/6-layer Starbucks models to ONNX:
+  ```python
+  from transformers import AutoModel, AutoConfig, AutoTokenizer
+  import torch
+  
+  for layers, dim, name in [(2, 32, "fast"), (4, 64, "regular"), (6, 128, "pro")]:
+      config = AutoConfig.from_pretrained("ielabgroup/Starbucks-msmarco", num_hidden_layers=layers)
+      model = AutoModel.from_pretrained("ielabgroup/Starbucks-msmarco", config=config).eval()
+      tokenizer = AutoTokenizer.from_pretrained("ielabgroup/Starbucks-msmarco")
+      dummy = tokenizer("hello", return_tensors="pt")
+      torch.onnx.export(model, (dummy["input_ids"], dummy["attention_mask"]),
+                         f"starbucks-{name}.onnx", input_names=["input_ids", "attention_mask"],
+                         output_names=["last_hidden_state"], dynamic_axes={...})
+  ```
+- Save ONNX models to ~/.desksearch/models/ (~20MB for 2-layer, ~40MB for 4-layer)
+- Add `ort` crate (Rust ONNX Runtime bindings) to desksearch-core
+- Implement `OnnxEmbedder` in Rust:
+  - Load ONNX model on startup
+  - Tokenize using `tokenizers` crate (HuggingFace tokenizers, Rust native)
+  - Run inference: input_ids → last_hidden_state → CLS token → truncate to dim → normalize
+  - Batch embedding support
+- Replace `EmbedClient` (Python subprocess) with `OnnxEmbedder` in the search pipeline
+- **Result: zero Python dependency, single binary does everything**
+
+### Agent 2b: INT8 Quantization for CPU Speed
+- Quantize ONNX models to INT8 using onnxruntime quantization tools
+- Benchmark: FP32 vs INT8 on CPU — expect 2-3x speedup
+- Save both FP32 and INT8 variants, auto-select based on config
+- Target: 200+ files/sec indexing on CPU-only laptop
+- Profile memory: INT8 model should use <50MB RAM
 
 ## Phase 3: Full Search Pipeline (2:00–2:30am)
 - Wire everything together: query → embed → parallel BM25 + vector → RRF → snippets → respond
