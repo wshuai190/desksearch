@@ -1,87 +1,126 @@
-# DeskSearch 🔍
+<p align="center">
+  <img src="docs/logo.png" alt="DeskSearch" width="120" />
+</p>
 
-**Search your files by meaning. Faster than Spotlight. 100% private.**
+<h1 align="center">DeskSearch</h1>
 
-<p>
+<p align="center">
+  <strong>Search your files by meaning. Faster than Spotlight. 100% private.</strong>
+</p>
+
+<p align="center">
   <a href="https://pypi.org/project/desksearch/"><img src="https://img.shields.io/pypi/v/desksearch?color=%2334D058&label=pypi" /></a>
+  <a href="https://github.com/wshuai190/desksearch/releases"><img src="https://img.shields.io/github/v/release/wshuai190/desksearch?label=rust&color=orange" /></a>
   <a href="https://github.com/wshuai190/desksearch/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" /></a>
   <a href="https://github.com/wshuai190/desksearch/actions"><img src="https://img.shields.io/github/actions/workflow/status/wshuai190/desksearch/ci.yml?label=tests" /></a>
-  <img src="https://img.shields.io/badge/python-3.10%2B-blue" />
 </p>
 
-DeskSearch is a local semantic search engine that understands what you're looking for — not just the words you type. It indexes your documents, code, and emails in seconds and finds results in under 2ms. Everything runs on your machine. Nothing is ever sent to the cloud.
-
-<p>
-  <img src="docs/screenshot.png" alt="DeskSearch Demo" width="720" />
+<p align="center">
+  <code>0.83ms search</code> · <code>12MB binary</code> · <code>100% offline</code> · <code>50k+ files</code>
 </p>
 
 ---
 
-## Key Features
+DeskSearch is a local semantic search engine that understands what you're looking for — not just the words you type. Index your documents, code, and emails in seconds. Search in under a millisecond. Everything stays on your machine.
 
-| | Feature | Description |
+Available as a **Python package** (`pip install desksearch`) and a **standalone Rust binary** (12MB, zero dependencies).
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="DeskSearch" width="720" />
+</p>
+
+---
+
+## Features
+
+| | Feature | What it means |
 |---|---|---|
-| 🧠 | **Semantic search** | Understands meaning, not just keywords — finds "quarterly revenue" when you search "Q3 earnings" |
-| ⚡ | **<2ms search latency** | Hybrid BM25 + vector search with reciprocal rank fusion |
-| 🔒 | **100% private** | Runs entirely on your machine — zero cloud, zero telemetry |
-| 📊 | **2D Matryoshka embeddings** | Starbucks model with 3 speed tiers (fast / regular / pro) |
-| 📁 | **Auto-indexes folders** | Documents, Desktop, Downloads — or any folder you choose |
-| 👁️ | **File watcher** | Instant re-index when files change |
-| 🎨 | **Beautiful web UI** | Dark mode, live search, file preview, analytics dashboard |
-| 🔌 | **Extensible connectors** | Built-in email, bookmarks, clipboard — or write your own |
-| ⌨️ | **Alfred/Raycast integration** | Search from your launcher |
-| 📱 | **PWA support** | Pin to your dock as a standalone app |
-
----
-
-## Performance
-
-Benchmarked on Apple Silicon with 50K documents and 64-dimensional embeddings (regular tier):
-
-| Metric | Value |
-|---|---|
-| Search latency p50 | **0.83 ms** |
-| Search latency p95 | **0.90 ms** |
-| FAISS raw search | **0.08 ms** |
-| Queries/sec | **1,193** |
-| Embedding model | Starbucks 2D Matryoshka (64d) |
-| Index size per 1K docs | ~3 MB |
-| Frontend bundle | ~92 KB gzip |
+| 🔍 | **Semantic search** | Finds "Q3 earnings" when you search "quarterly revenue" — understands meaning, not just keywords |
+| ⚡ | **Sub-millisecond search** | 0.83ms p50 latency powered by Starbucks 2D Matryoshka embeddings |
+| 🔒 | **100% private** | All processing runs locally. No cloud. No telemetry. No data ever leaves your machine |
+| 📄 | **30+ file types** | PDF, DOCX, PPTX, XLSX, code (20+ languages), email, Jupyter notebooks, archives |
+| 👁 | **Live reindexing** | Built-in file watcher auto-detects changes — your index is always current |
+| 🎨 | **Beautiful web UI** | React frontend with dark mode, live search, file preview, and keyboard shortcuts |
+| 🦀 | **Rust core** | 12MB self-contained binary, <50ms cold startup, no runtime dependencies |
+| ☕ | **3 speed tiers** | **Fast** (2-layer, 32d) · **Regular** (4-layer, 64d) · **Pro** (6-layer, 128d) — you pick the trade-off |
 
 ---
 
 ## Quick Start
 
+### Python
+
 ```bash
 pip install desksearch
-
 desksearch
-
-# Opens http://localhost:3777 — that's it.
+# → opens http://localhost:3777
 ```
 
-On first run, DeskSearch walks you through an onboarding wizard to pick folders and a speed tier. After that, `desksearch` starts the server and file watcher automatically.
+### Rust
+
+```bash
+curl -fsSL https://github.com/wshuai190/desksearch/releases/latest/download/desksearch -o desksearch
+chmod +x desksearch
+./desksearch
+# → opens http://localhost:3777
+```
+
+On first run, DeskSearch walks you through an onboarding wizard to pick folders and a speed tier. After that, one command is all you need.
+
+---
+
+## CLI Examples
+
+```bash
+# Semantic search from the terminal
+desksearch search "machine learning papers"
+desksearch search "budget spreadsheet" --type xlsx --json
+
+# Index specific folders
+desksearch index ~/Projects ~/Research
+
+# Check index health
+desksearch status
+desksearch doctor            # full health check
+
+# Manage watched folders
+desksearch folders add ~/Notes
+desksearch folders list
+
+# Switch speed tier
+desksearch config set search_speed pro
+
+# Run as a background daemon
+desksearch daemon start
+desksearch daemon install    # auto-start on login (macOS LaunchAgent)
+
+# Benchmark your setup
+desksearch benchmark --files 1000
+```
+
+All commands support `--json` for scripting and automation.
 
 ---
 
 ## DeskSearch vs. Alternatives
 
-| | DeskSearch | Spotlight | Everything | Alfred |
+| | **DeskSearch** | Spotlight | Everything | Alfred |
 |---|---|---|---|---|
 | **Search type** | Semantic + keyword | Keyword | Filename only | Keyword |
-| **Understands meaning** | Yes | No | No | No |
-| **Privacy** | 100% local | Local (with Siri opt-in) | Local | Local |
-| **Search latency** | ~1 ms | ~50 ms | ~1 ms | ~50 ms |
-| **File content search** | Yes (30+ formats) | Limited | No | Via plugins |
-| **Extensible** | Plugins + API | No | No | Workflows |
-| **Code-aware** | Yes (20+ languages) | Minimal | No | No |
-| **Open source** | Yes (MIT) | No | No | No |
+| **Understands meaning** | ✅ Yes | ❌ | ❌ | ❌ |
+| **File content search** | ✅ 30+ formats | Limited | ❌ | Via plugins |
+| **Search latency** | **~1ms** | ~50ms | ~1ms | ~50ms |
+| **Privacy** | 100% local | Local (Siri opt-in) | Local | Local |
+| **Code-aware** | ✅ 20+ languages | Minimal | ❌ | ❌ |
+| **Extensible** | Plugins + REST API | ❌ | ❌ | Workflows |
+| **Open source** | ✅ MIT | ❌ | ❌ | ❌ |
+| **Cross-platform** | macOS, Linux | macOS only | Windows only | macOS only |
 
 ---
 
 ## Architecture
 
-DeskSearch uses **hybrid retrieval** — every query runs in parallel against a [Tantivy](https://github.com/quickwit-oss/tantivy) BM25 index (keyword matching) and a FAISS dense vector index (semantic similarity). Results are merged via **Reciprocal Rank Fusion (RRF)** with a tunable alpha parameter, then boosted by filename relevance and recency. Embeddings come from the **Starbucks 2D Matryoshka** model, which supports layer and dimension truncation: you choose a speed tier (`fast` = 2 layers/32d, `regular` = 4 layers/64d, `pro` = 6 layers/128d) and DeskSearch loads only the layers you need. Inference runs on ONNX Runtime for 3-5x speedup over PyTorch. The indexing pipeline parses files in parallel (6 workers), chunks text at sentence boundaries, and embeds in batches of 256 for maximum throughput.
+DeskSearch runs **hybrid retrieval** — every query hits a [Tantivy](https://github.com/quickwit-oss/tantivy) BM25 index and a FAISS dense vector index in parallel, then merges results via Reciprocal Rank Fusion (RRF). Embeddings come from the Starbucks 2D Matryoshka model with layer and dimension truncation, running on ONNX Runtime for 3–5× speedup over PyTorch. The indexing pipeline parses files across 6 parallel workers, chunks at sentence boundaries, and embeds in batches of 256 for maximum throughput.
 
 ```
 Your Files (PDF, DOCX, Markdown, Code, ...)
@@ -94,7 +133,7 @@ Your Files (PDF, DOCX, Markdown, Code, ...)
                │
        ┌───────┴────────┐
        ▼                ▼
-  BM25 (tantivy)    FAISS (dense)
+  BM25 (Tantivy)   FAISS (dense)
   keyword index     semantic index
        │                │
        └───────┬────────┘
@@ -107,41 +146,17 @@ Your Files (PDF, DOCX, Markdown, Code, ...)
 
 ---
 
-## CLI
+## Speed Tiers
+
+| Tier | Layers | Dimensions | Best for |
+|---|---|---|---|
+| `fast` | 2 | 32 | Large corpora, older hardware |
+| `regular` | 4 | 64 | **Default** — balanced speed and quality |
+| `pro` | 6 | 128 | Best accuracy, research use |
 
 ```bash
-# Search from the terminal
-desksearch search "machine learning papers"
-desksearch search "budget spreadsheet" --type xlsx --json
-
-# Index specific paths
-desksearch index ~/Projects ~/Research
-
-# Check index health
-desksearch status
-desksearch stats          # detailed breakdown
-desksearch doctor         # full health check
-
-# Manage watched folders
-desksearch folders list
-desksearch folders add ~/Notes
-desksearch folders remove ~/Old
-
-# Configuration
-desksearch config show
 desksearch config set search_speed pro
-
-# Background daemon
-desksearch daemon start
-desksearch daemon install  # auto-start on login (macOS LaunchAgent)
-desksearch daemon status
-desksearch daemon logs --follow
-
-# Benchmarking
-desksearch benchmark --files 1000
 ```
-
-All commands support `--json` for scripting.
 
 ---
 
@@ -150,24 +165,8 @@ All commands support `--json` for scripting.
 DeskSearch exposes a REST API on `localhost:3777`:
 
 ```bash
-# Search
 curl "http://localhost:3777/api/search?q=quarterly+revenue&limit=5"
-
-# Index a folder
-curl -X POST "http://localhost:3777/api/index" \
-  -H "Content-Type: application/json" \
-  -d '{"paths": ["~/Research"]}'
-
-# Index status
 curl "http://localhost:3777/api/status"
-
-# List indexed files
-curl "http://localhost:3777/api/files?limit=20&type=pdf"
-
-# Find duplicates
-curl "http://localhost:3777/api/duplicates"
-
-# Health check
 curl "http://localhost:3777/api/health"
 ```
 
@@ -185,57 +184,9 @@ with DeskSearch() as ds:
 
 ---
 
-## Configuration
-
-Config lives at `~/.desksearch/config.json`. Edit with `desksearch config set KEY VALUE`.
-
-### Speed Tiers
-
-| Tier | Layers | Dimensions | Use case |
-|---|---|---|---|
-| `fast` | 2 | 32 | Large corpora, older hardware |
-| `regular` | 4 | 64 | **Default** — balanced speed and quality |
-| `pro` | 6 | 128 | Best accuracy, more RAM |
-
-```bash
-desksearch config set search_speed pro
-```
-
-### Other Settings
-
-| Setting | Default | Description |
-|---|---|---|
-| `port` | `3777` | API server port |
-| `index_paths` | `~/Documents, ~/Desktop, ~/Downloads` | Folders to watch |
-| `embedding_model` | `ielabgroup/Starbucks-msmarco` | 2D Matryoshka model |
-| `chunk_size` | `512` | Characters per chunk |
-| `chunk_overlap` | `64` | Overlap between chunks |
-| `max_file_size_mb` | `50` | Skip files larger than this |
-| `api_key` | `null` | Optional bearer token for API auth |
-
-### Supported File Types
-
-Documents (PDF, DOCX, PPTX, XLSX, EPUB, RTF, LaTeX), code (Python, JS/TS, Java, C/C++, Go, Rust, Ruby, Swift, and more), web (HTML, JSON, YAML, Markdown, CSV), notebooks (Jupyter), email (.eml, .mbox), and archives (ZIP, TAR, GZ).
-
----
-
-## Plugins
-
-DeskSearch supports three plugin types:
-
-- **Parsers** — add support for new file formats
-- **Search plugins** — rerank or filter results
-- **Connectors** — pull documents from external sources (email, bookmarks, clipboard)
-
-Drop a `.py` file in `~/.desksearch/plugins/` or install via pip (`entry_points["desksearch.plugins"]`).
-
-Built-in connectors: email indexer, browser bookmarks, clipboard monitor.
-
----
-
 ## Contributing
 
-Contributions are welcome! DeskSearch is MIT-licensed.
+Contributions welcome. DeskSearch is MIT-licensed.
 
 ```bash
 git clone https://github.com/wshuai190/desksearch.git
@@ -244,13 +195,8 @@ pip install -e ".[dev]"
 pytest
 ```
 
-- **Tests**: `pytest` (237 tests)
-- **Benchmarks**: `desksearch benchmark`
-
-Please open an issue before submitting large changes.
-
 ---
 
 ## License
 
-[MIT](LICENSE) © [Shuai Wang](https://github.com/wshuai190)
+[MIT](LICENSE) © [Shuai Wang](https://wshuai190.github.io/)
