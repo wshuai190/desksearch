@@ -25,6 +25,10 @@ notify = "7"
 
 # Parsing
 scraper = "0.22"
+pdf-extract = "0.7"
+zip = "2"
+quick-xml = "0.37"
+calamine = "0.26"
 
 # Hashing for change detection
 xxhash-rust = { version = "0.8", features = ["xxh3"] }

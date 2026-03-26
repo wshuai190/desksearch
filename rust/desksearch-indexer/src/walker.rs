@@ -3,7 +3,7 @@
 //! Walks directories respecting .gitignore rules and common exclusion
 //! patterns (node_modules, .git, etc.). Uses rayon for parallel traversal.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Instant;
 
 use anyhow::Result;

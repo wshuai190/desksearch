@@ -5,6 +5,10 @@
 
 pub mod text;
 pub mod html;
+pub mod pdf;
+pub mod docx;
+pub mod pptx;
+pub mod xlsx;
 
 use std::path::Path;
 use anyhow::Result;
@@ -35,7 +39,12 @@ pub fn parse_file(path: &Path) -> Result<Option<String>> {
         }
         // HTML
         "html" | "htm" => Some(html::parse_html_file(path)?),
-        // TODO: PDF, DOCX, PPTX parsers (Phase 2)
+        // PDF
+        "pdf" => Some(pdf::parse_pdf_file(path)?),
+        // Office documents
+        "docx" => Some(docx::parse_docx_file(path)?),
+        "pptx" => Some(pptx::parse_pptx_file(path)?),
+        "xlsx" => Some(xlsx::parse_xlsx_file(path)?),
         _ => {
             debug!(ext = ext, path = %path.display(), "Unsupported file format");
             None
@@ -62,6 +71,7 @@ pub fn is_supported(path: &Path) -> bool {
             | "kt" | "scala" | "lua" | "sh" | "bash" | "zsh" | "sql" | "r"
             | "m" | "mm"
             | "html" | "htm"
+            | "pdf" | "docx" | "pptx" | "xlsx"
     )
 }
 
@@ -77,5 +87,9 @@ mod tests {
         assert!(is_supported(Path::new("test.html")));
         assert!(!is_supported(Path::new("test.exe")));
         assert!(!is_supported(Path::new("test.png")));
+        assert!(is_supported(Path::new("report.pdf")));
+        assert!(is_supported(Path::new("doc.docx")));
+        assert!(is_supported(Path::new("slides.pptx")));
+        assert!(is_supported(Path::new("data.xlsx")));
     }
 }

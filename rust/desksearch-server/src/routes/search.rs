@@ -10,7 +10,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use crate::state::AppState;
-use desksearch_core::{SearchQuery, SearchResult};
+use desksearch_core::SearchQuery;
 
 #[derive(Debug, Deserialize)]
 pub struct SearchRequest {
@@ -26,8 +26,20 @@ fn default_top_k() -> usize {
 }
 
 #[derive(Debug, Serialize)]
+pub struct EnrichedResult {
+    pub doc_id: u64,
+    pub path: String,
+    pub filename: String,
+    pub snippet: String,
+    pub score: f64,
+    pub file_type: String,
+    pub modified: Option<String>,
+    pub file_size: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SearchResponse {
-    pub results: Vec<SearchResult>,
+    pub results: Vec<EnrichedResult>,
     pub total: usize,
     pub elapsed_ms: f64,
 }
@@ -50,11 +62,33 @@ async fn search_handler(
         engine.search(&query).unwrap_or_default()
     };
 
+    let store = state.store.lock().unwrap();
+    let enriched: Vec<EnrichedResult> = results
+        .into_iter()
+        .map(|r| {
+            let file_meta = store.get_file(&r.file_path).ok().flatten();
+            EnrichedResult {
+                doc_id: r.chunk_id,
+                path: r.file_path.clone(),
+                filename: r.file_name.clone(),
+                snippet: r.snippet.plain,
+                score: r.score,
+                file_type: file_meta
+                    .as_ref()
+                    .map(|m| m.extension.clone())
+                    .unwrap_or_default(),
+                modified: file_meta.as_ref().map(|m| m.modified_at.clone()),
+                file_size: file_meta.map(|m| m.size_bytes),
+            }
+        })
+        .collect();
+    drop(store);
+
     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    let total = results.len();
+    let total = enriched.len();
 
     Json(SearchResponse {
-        results,
+        results: enriched,
         total,
         elapsed_ms,
     })

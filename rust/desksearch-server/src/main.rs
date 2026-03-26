@@ -14,8 +14,11 @@ use axum::Router;
 use clap::{Parser, Subcommand};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
+
+use desksearch_indexer::{ChunkerConfig, FileWalker};
+use desksearch_indexer::parsers;
 
 use state::AppState;
 
@@ -114,9 +117,12 @@ async fn serve(port: u16, data_dir: PathBuf) -> Result<()> {
 }
 
 fn index_directory(path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
+    use desksearch_core::SearchConfig;
+    use desksearch_indexer::MetadataStore;
+
     info!("Indexing directory: {}", path.display());
 
-    let walker = desksearch_indexer::FileWalker::new(vec![path.clone()]);
+    let walker = FileWalker::new(vec![path.clone()]);
     let result = walker.walk()?;
 
     info!(
@@ -126,8 +132,96 @@ fn index_directory(path: &PathBuf, data_dir: &PathBuf) -> Result<()> {
         result.elapsed_ms
     );
 
-    // TODO: Parse, chunk, and index each file
-    info!("Indexing pipeline not yet implemented — files discovered only");
+    // Open stores
+    std::fs::create_dir_all(data_dir)?;
+    let index_dir = data_dir.join("index");
+    let db_path = data_dir.join("metadata.db");
+
+    let engine = desksearch_core::SearchEngine::new(&index_dir, SearchConfig::default())?;
+    let store = MetadataStore::open(&db_path)?;
+    let chunker_config = ChunkerConfig::default();
+    let mut writer = engine.bm25().writer(50)?;
+
+    let mut indexed = 0usize;
+    let mut skipped = result.skipped;
+
+    for file_path in &result.files {
+        let path_str = file_path.to_string_lossy();
+
+        // Parse file content
+        let text = match parsers::parse_file(file_path) {
+            Ok(Some(text)) => text,
+            Ok(None) => {
+                skipped += 1;
+                continue;
+            }
+            Err(e) => {
+                warn!("Failed to parse {}: {e}", path_str);
+                skipped += 1;
+                continue;
+            }
+        };
+
+        // Get file metadata
+        let metadata = std::fs::metadata(file_path).ok();
+        let file_name = file_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let extension = file_path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let size_bytes = metadata.as_ref().map(|m| m.len() as i64).unwrap_or(0);
+        let modified_time = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+
+        // Content hash for dedup
+        let content_hash = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            text.as_bytes().hash(&mut hasher);
+            format!("{:x}", hasher.finish())
+        };
+
+        // Skip if unchanged
+        if !store.needs_reindex(&path_str, &content_hash)? {
+            continue;
+        }
+
+        // Upsert file record
+        let doc_id = store.upsert_file(
+            &path_str,
+            &file_name,
+            &extension,
+            size_bytes,
+            &content_hash,
+            modified_time,
+        )?;
+
+        // Replace chunks
+        let _ = store.delete_chunks_for_doc(doc_id);
+        engine.bm25().delete_by_path(&mut writer, &path_str);
+
+        let chunks = desksearch_indexer::chunker::chunk_text(&text, &chunker_config);
+        for chunk in &chunks {
+            let chunk_id = store.insert_chunk(doc_id, chunk.index as i64, &chunk.text, chunk.offset as i64)?;
+            engine.bm25().add_chunk(&mut writer, chunk_id as u64, &chunk.text, &path_str)?;
+        }
+
+        indexed += 1;
+    }
+
+    writer.commit()?;
+
+    info!("Indexed {indexed} files ({skipped} skipped)");
+    println!("Indexed {indexed} files ({skipped} skipped)");
+    println!("Total files: {}", store.file_count()?);
+    println!("Total chunks: {}", store.chunk_count()?);
 
     Ok(())
 }

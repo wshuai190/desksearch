@@ -10,8 +10,8 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
-use crate::bm25::{BM25Index, BM25Result};
-use crate::fusion::{weighted_rrf, FusedResult, RankedItem};
+use crate::bm25::BM25Index;
+use crate::fusion::{weighted_rrf, RankedItem};
 use crate::snippets::{extract_snippet, Snippet};
 
 /// Configuration for the search engine.

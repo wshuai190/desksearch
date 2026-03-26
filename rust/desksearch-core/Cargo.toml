@@ -17,7 +17,7 @@ rayon.workspace = true
 rusqlite.workspace = true
 
 # Dense vector search
-# usearch.workspace = true  # enable when ready
+usearch.workspace = true
 
 # Snippet extraction
 regex = "1"

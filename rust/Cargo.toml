@@ -15,7 +15,7 @@ authors = ["Shuai Wang <shuai.wang@uq.edu.au>"]
 [workspace.dependencies]
 # Search
 tantivy = "0.22"
-usearch = "2"
+usearch = { version = "2", default-features = false, features = ["fp16lib"] }
 
 # Storage
 rusqlite = { version = "0.32", features = ["bundled"] }

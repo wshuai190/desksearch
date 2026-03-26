@@ -1,7 +1,8 @@
 //! Application state shared across all request handlers.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, RwLock};
+use std::time::Instant;
 
 use anyhow::Result;
 use desksearch_core::{SearchEngine, SearchConfig};
@@ -16,6 +17,10 @@ pub struct AppState {
     pub search: RwLock<SearchEngine>,
     /// Metadata store for file/chunk info (Mutex because rusqlite is !Sync).
     pub store: Mutex<MetadataStore>,
+    /// Server start time (for uptime calculation).
+    pub start_time: Instant,
+    /// Path to config file (~/.desksearch/config.json).
+    pub config_path: PathBuf,
 }
 
 impl AppState {
@@ -25,6 +30,7 @@ impl AppState {
 
         let index_dir = data_dir.join("index");
         let db_path = data_dir.join("metadata.db");
+        let config_path = data_dir.join("config.json");
 
         let search = SearchEngine::new(&index_dir, SearchConfig::default())?;
         let store = MetadataStore::open(&db_path)?;
@@ -32,6 +38,8 @@ impl AppState {
         Ok(Self {
             search: RwLock::new(search),
             store: Mutex::new(store),
+            start_time: Instant::now(),
+            config_path,
         })
     }
 }

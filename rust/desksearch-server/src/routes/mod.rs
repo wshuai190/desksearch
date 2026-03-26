@@ -1,6 +1,10 @@
 //! API route handlers.
 
+mod folders;
+mod health;
+mod index;
 mod search;
+mod settings;
 mod status;
 
 use std::sync::Arc;
@@ -12,5 +16,9 @@ pub fn api_router(state: Arc<AppState>) -> Router {
     Router::new()
         .merge(search::router())
         .merge(status::router())
+        .merge(health::router())
+        .merge(index::router())
+        .merge(folders::router())
+        .merge(settings::router())
         .with_state(state)
 }
