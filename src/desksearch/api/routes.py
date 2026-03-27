@@ -1,5 +1,7 @@
 """FastAPI route definitions for DeskSearch."""
 import asyncio
+import csv
+import io
 import logging
 import math
 import platform
@@ -11,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import PlainTextResponse, StreamingResponse
 
 from desksearch.api.schemas import (
     ActivityEntry,
@@ -146,21 +149,57 @@ def _ensure_doc_embeddings() -> None:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/search", response_model=RichSearchResponse)
+@router.get("/search")
 async def search(
     q: str = Query(..., min_length=1, description="Search query"),
-    type: Optional[str] = Query(None, description="Filter by file type (e.g. pdf)"),
+    type: Optional[str] = Query(None, description="Filter by file type (comma-separated, e.g. pdf,docx)"),
     limit: int = Query(20, ge=1, le=100, description="Max results"),
     rich: bool = Query(True, description="Include NL answers and related docs"),
     sort_by: Optional[str] = Query(None, description="Sort by: relevance, date_modified, file_size, file_type"),
+    sort: Optional[str] = Query(None, description="Sort by: relevance, date, size, name (alias for sort_by)"),
     folder: Optional[str] = Query(None, description="Restrict results to a specific folder path"),
-) -> RichSearchResponse:
+    after: Optional[str] = Query(None, description="Only files modified after this date (YYYY-MM-DD)"),
+    before: Optional[str] = Query(None, description="Only files modified before this date (YYYY-MM-DD)"),
+    size_min: Optional[int] = Query(None, ge=0, description="Minimum file size in bytes"),
+    size_max: Optional[int] = Query(None, ge=0, description="Maximum file size in bytes"),
+    format: Optional[str] = Query(None, description="Export format: json, csv, or text"),
+):
     """Execute a hybrid search query against the index."""
     start = time.perf_counter()
 
+    # Normalise sort parameter: `sort` is the user-friendly alias
+    effective_sort = sort_by
+    if sort and not sort_by:
+        sort_map = {"relevance": "relevance", "date": "date_modified", "size": "file_size", "name": "file_type"}
+        effective_sort = sort_map.get(sort, sort)
+
+    # Parse comma-separated type filter
+    type_set: set[str] | None = None
+    if type:
+        type_set = {t.strip().lower().lstrip(".") for t in type.split(",") if t.strip()}
+
+    # Parse date-range filters
+    after_ts: float | None = None
+    before_ts: float | None = None
+    if after:
+        try:
+            after_ts = datetime.strptime(after, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid date format for 'after': {after}. Use YYYY-MM-DD.")
+    if before:
+        try:
+            before_ts = datetime.strptime(before, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid date format for 'before': {before}. Use YYYY-MM-DD.")
+
     if _search_engine is None or _embedder is None or _store is None:
         elapsed_ms = (time.perf_counter() - start) * 1000
-        return RichSearchResponse(results=[], total=0, query_time_ms=round(elapsed_ms, 2))
+        empty_resp = RichSearchResponse(results=[], total=0, query_time_ms=round(elapsed_ms, 2))
+        if format == "csv":
+            return PlainTextResponse("path,score,snippet\n", media_type="text/csv")
+        if format == "text":
+            return PlainTextResponse("", media_type="text/plain")
+        return empty_resp
 
     # Embed the query
     loop = asyncio.get_event_loop()
@@ -252,11 +291,23 @@ async def search(
     results: list[RichSearchResult] = []
     for r, chunk, doc in ranked:
         file_type = doc.extension.lstrip(".")
-        if type and file_type != type:
+        if type_set and file_type.lower() not in type_set:
             continue
 
         # Folder filter: skip files not under the requested folder
         if folder and not doc.path.startswith(folder):
+            continue
+
+        # Date range filters
+        if after_ts and doc.modified_time < after_ts:
+            continue
+        if before_ts and doc.modified_time > before_ts:
+            continue
+
+        # Size filters
+        if size_min is not None and doc.size < size_min:
+            continue
+        if size_max is not None and doc.size > size_max:
             continue
 
         # Use the highlighted snippet for richer display; fall back to raw text
@@ -303,17 +354,17 @@ async def search(
         except Exception as exc:
             logger.debug("NL answer extraction failed: %s", exc)
 
-    # Apply sort_by if not default relevance ordering
-    if sort_by and sort_by != "relevance":
-        if sort_by == "date_modified":
+    # Apply sort if not default relevance ordering
+    if effective_sort and effective_sort != "relevance":
+        if effective_sort == "date_modified":
             results.sort(
                 key=lambda r: r.modified or datetime.min.replace(tzinfo=timezone.utc),
                 reverse=True,
             )
-        elif sort_by == "file_size":
+        elif effective_sort == "file_size":
             results.sort(key=lambda r: r.file_size or 0, reverse=True)
-        elif sort_by == "file_type":
-            results.sort(key=lambda r: r.file_type)
+        elif effective_sort in ("file_type", "name"):
+            results.sort(key=lambda r: r.filename.lower())
 
     elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -338,6 +389,20 @@ async def search(
         except Exception:
             pass
 
+    # Export formats
+    if format == "csv":
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["path", "score", "snippet"])
+        for r in results:
+            writer.writerow([r.path, r.score, r.snippet])
+        return PlainTextResponse(buf.getvalue(), media_type="text/csv")
+
+    if format == "text":
+        lines = [r.path for r in results]
+        return PlainTextResponse("\n".join(lines), media_type="text/plain")
+
+    # format == "json" or default — return the standard JSON response
     return RichSearchResponse(
         results=results,
         total=len(results),
@@ -1606,6 +1671,27 @@ async def search_history(
 # ---------------------------------------------------------------------------
 
 
+@router.post("/favorites")
+async def add_favorite_body(body: dict):
+    """Add a file to favorites via JSON body (path or doc_id)."""
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Store not available")
+    doc_id = body.get("doc_id")
+    path = body.get("path")
+    if doc_id is None and path:
+        doc = _store.get_document(Path(path))
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found for path")
+        doc_id = doc.id
+    if doc_id is None:
+        raise HTTPException(status_code=400, detail="Provide doc_id or path")
+    doc = _store.get_document_by_id(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    added = _store.add_favorite(doc_id)
+    return {"status": "added" if added else "already_exists", "doc_id": doc_id}
+
+
 @router.post("/favorites/{doc_id}")
 async def add_favorite(doc_id: int):
     """Star/favorite a document."""
@@ -1655,6 +1741,27 @@ async def list_favorites() -> FavoritesResponse:
 # ---------------------------------------------------------------------------
 
 
+@router.post("/recent")
+async def record_recent_open(body: dict):
+    """Record a file open via JSON body (doc_id or path)."""
+    if _store is None:
+        raise HTTPException(status_code=503, detail="Store not available")
+    doc_id = body.get("doc_id")
+    path = body.get("path")
+    if doc_id is None and path:
+        doc = _store.get_document(Path(path))
+        if doc is None:
+            raise HTTPException(status_code=404, detail="Document not found for path")
+        doc_id = doc.id
+    if doc_id is None:
+        raise HTTPException(status_code=400, detail="Provide doc_id or path")
+    doc = _store.get_document_by_id(doc_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    _store.record_open(doc_id)
+    return {"status": "ok", "doc_id": doc_id}
+
+
 @router.post("/files/{doc_id}/open")
 async def track_file_open(doc_id: int):
     """Record that a file was opened from search results."""
@@ -1688,3 +1795,183 @@ async def recent_opens(
         for r in rows
     ]
     return RecentOpensResponse(entries=entries)
+
+
+# ---------------------------------------------------------------------------
+# Connectors / Data Sources
+# ---------------------------------------------------------------------------
+
+
+@router.get("/connectors")
+async def list_connectors() -> dict:
+    """List all available connector plugins and their status."""
+    from desksearch.plugins.builtin import ALL_BUILTIN_CONNECTORS
+
+    connectors = []
+    for cls in ALL_BUILTIN_CONNECTORS:
+        instance = cls()
+        # Check if enabled in config
+        enabled_plugins = _config.enabled_plugins
+        is_enabled = (
+            not enabled_plugins  # empty list = all enabled
+            or instance.name in enabled_plugins
+        )
+        has_config = instance.name in _config.plugin_config
+
+        connectors.append({
+            "name": instance.name,
+            "description": instance.description,
+            "version": instance.version,
+            "author": instance.author,
+            "enabled": is_enabled,
+            "configured": has_config,
+            "config": _config.plugin_config.get(instance.name, {}),
+        })
+
+    return {"connectors": connectors, "total": len(connectors)}
+
+
+@router.put("/connectors/{connector_name}/config")
+async def update_connector_config(connector_name: str, body: dict) -> dict:
+    """Update configuration for a specific connector."""
+    global _config
+    from desksearch.plugins.builtin import ALL_BUILTIN_CONNECTORS
+
+    # Validate connector name
+    valid_names = {cls().name for cls in ALL_BUILTIN_CONNECTORS}
+    if connector_name not in valid_names:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown connector: {connector_name}. Available: {sorted(valid_names)}",
+        )
+
+    config_data = _config.model_dump()
+    plugin_config = dict(config_data.get("plugin_config", {}))
+    plugin_config[connector_name] = body.get("config", {})
+    config_data["plugin_config"] = plugin_config
+    _config = Config(**config_data)
+    _config.save()
+
+    return {
+        "status": "ok",
+        "connector": connector_name,
+        "config": plugin_config[connector_name],
+    }
+
+
+@router.post("/connectors/{connector_name}/sync")
+async def sync_connector(connector_name: str) -> dict:
+    """Trigger a sync/fetch from a specific connector and index the results."""
+    from desksearch.plugins.builtin import ALL_BUILTIN_CONNECTORS
+
+    if _pipeline is None:
+        raise HTTPException(status_code=503, detail="Indexing pipeline not initialized")
+
+    # Find the connector class
+    connector_cls = None
+    for cls in ALL_BUILTIN_CONNECTORS:
+        instance = cls()
+        if instance.name == connector_name:
+            connector_cls = cls
+            break
+
+    if connector_cls is None:
+        raise HTTPException(status_code=404, detail=f"Unknown connector: {connector_name}")
+
+    # Instantiate and configure
+    connector = connector_cls()
+    plugin_cfg = _config.plugin_config.get(connector_name, {})
+    connector.setup(plugin_cfg)
+
+    # Fetch documents
+    loop = asyncio.get_event_loop()
+    try:
+        docs = await loop.run_in_executor(None, connector.fetch)
+    except Exception as exc:
+        logger.exception("Connector %s fetch failed", connector_name)
+        raise HTTPException(status_code=500, detail=f"Fetch failed: {exc}")
+
+    if not docs:
+        return {
+            "status": "ok",
+            "connector": connector_name,
+            "documents_found": 0,
+            "documents_indexed": 0,
+        }
+
+    # Index the documents
+    import tempfile
+    indexed_count = 0
+    errors = 0
+
+    with tempfile.TemporaryDirectory() as stage_dir:
+        stage = Path(stage_dir)
+        for doc in docs:
+            try:
+                safe_name = doc.id.replace(":", "_").replace("/", "_")[:64]
+                staged = stage / f"{safe_name}.txt"
+                staged.write_text(doc.content, encoding="utf-8")
+
+                gen = _pipeline.index_file(staged)
+                try:
+                    while True:
+                        next(gen)
+                except StopIteration:
+                    pass
+                indexed_count += 1
+            except Exception as exc:
+                logger.warning(
+                    "Failed to index doc %s from connector %s: %s",
+                    doc.id, connector_name, exc,
+                )
+                errors += 1
+
+    return {
+        "status": "ok",
+        "connector": connector_name,
+        "documents_found": len(docs),
+        "documents_indexed": indexed_count,
+        "errors": errors,
+    }
+
+
+@router.post("/connectors/{connector_name}/enable")
+async def enable_connector(connector_name: str) -> dict:
+    """Enable a connector."""
+    global _config
+    from desksearch.plugins.builtin import ALL_BUILTIN_CONNECTORS
+
+    valid_names = {cls().name for cls in ALL_BUILTIN_CONNECTORS}
+    if connector_name not in valid_names:
+        raise HTTPException(status_code=404, detail=f"Unknown connector: {connector_name}")
+
+    config_data = _config.model_dump()
+    enabled = list(config_data.get("enabled_plugins", []))
+    if connector_name not in enabled:
+        enabled.append(connector_name)
+    config_data["enabled_plugins"] = enabled
+    _config = Config(**config_data)
+    _config.save()
+
+    return {"status": "ok", "connector": connector_name, "enabled": True}
+
+
+@router.post("/connectors/{connector_name}/disable")
+async def disable_connector(connector_name: str) -> dict:
+    """Disable a connector."""
+    global _config
+    from desksearch.plugins.builtin import ALL_BUILTIN_CONNECTORS
+
+    valid_names = {cls().name for cls in ALL_BUILTIN_CONNECTORS}
+    if connector_name not in valid_names:
+        raise HTTPException(status_code=404, detail=f"Unknown connector: {connector_name}")
+
+    config_data = _config.model_dump()
+    enabled = list(config_data.get("enabled_plugins", []))
+    if connector_name in enabled:
+        enabled.remove(connector_name)
+    config_data["enabled_plugins"] = enabled
+    _config = Config(**config_data)
+    _config.save()
+
+    return {"status": "ok", "connector": connector_name, "enabled": False}
