@@ -57,7 +57,21 @@ router = APIRouter(prefix="/api")
 # Module-level state — set by server.py at startup
 _config: Config = Config()
 _indexing: bool = False
+_index_start_time: float = 0.0
 _index_progress_subscribers: list[WebSocket] = []
+
+# Live progress state for the polling endpoint /api/index/status
+_index_progress: dict = {
+    "state": "idle",        # idle | discovering | indexing | complete | error
+    "phase": "",            # discovery | parsing | embedding | storing
+    "processed": 0,
+    "total": 0,
+    "percent": 0.0,
+    "current_file": "",
+    "files_per_sec": 0.0,
+    "elapsed_sec": 0.0,
+    "errors": [],
+}
 _search_engine = None  # HybridSearchEngine
 _pipeline = None  # IndexingPipeline
 _embedder = None  # Embedder
@@ -546,12 +560,24 @@ async def health() -> dict:
 
 
 @router.post("/index", response_model=IndexStatus)
-async def trigger_index(request: IndexRequest) -> IndexStatus:
-    """Trigger indexing for the specified paths."""
-    global _indexing
+async def trigger_index(request: IndexRequest | None = None) -> IndexStatus:
+    """Trigger indexing for the specified paths.
+
+    If no paths are provided, indexes all configured folders from settings.
+    """
+    global _indexing, _index_start_time
 
     if _pipeline is None:
         raise HTTPException(status_code=503, detail="Indexing pipeline not initialized")
+
+    # Fall back to configured index_paths when no paths provided
+    if request is None or not request.paths:
+        if not _config.index_paths:
+            raise HTTPException(
+                status_code=400,
+                detail="No paths provided and no folders configured. Add folders first.",
+            )
+        request = IndexRequest(paths=[str(p) for p in _config.index_paths])
 
     # Validate paths
     for p in request.paths:
@@ -560,9 +586,21 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
             raise HTTPException(status_code=400, detail=f"Path does not exist: {p}")
 
     _indexing = True
+    _index_start_time = time.time()
+    _index_progress.update({
+        "state": "discovering",
+        "phase": "discovery",
+        "processed": 0,
+        "total": 0,
+        "percent": 0.0,
+        "current_file": "",
+        "files_per_sec": 0.0,
+        "elapsed_sec": 0.0,
+        "errors": [],
+    })
 
     async def _run_index() -> None:
-        global _indexing
+        global _indexing, _index_start_time
         index_start = time.time()
         total_indexed = 0
         try:
@@ -709,6 +747,41 @@ async def status() -> IndexStatus:
     )
 
 
+@router.get("/index/status")
+async def index_status() -> dict:
+    """Return real-time indexing progress for polling-based UIs.
+
+    Returns a rich status dict with state, phase, processed/total counts,
+    percentage, current file, throughput, elapsed time, and errors.
+    When not indexing, returns state='idle'.
+    """
+    if not _indexing:
+        # If we just finished, the progress dict may still say 'complete'
+        state = _index_progress.get("state", "idle")
+        if state == "complete":
+            return dict(_index_progress)
+        return {
+            "state": "idle",
+            "phase": "",
+            "processed": 0,
+            "total": 0,
+            "percent": 0.0,
+            "current_file": "",
+            "files_per_sec": 0.0,
+            "elapsed_sec": 0.0,
+            "errors": [],
+        }
+    # Return a copy with live elapsed_sec and files_per_sec
+    result = dict(_index_progress)
+    if _index_start_time > 0:
+        elapsed = time.time() - _index_start_time
+        result["elapsed_sec"] = round(elapsed, 1)
+        processed = result.get("processed", 0)
+        if elapsed > 0 and processed > 0:
+            result["files_per_sec"] = round(processed / elapsed, 1)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Settings
 # ---------------------------------------------------------------------------
@@ -723,6 +796,7 @@ async def get_settings() -> SettingsResponse:
         embedding_model=_config.embedding_model,
         chunk_size=_config.chunk_size,
         chunk_overlap=_config.chunk_overlap,
+        search_speed=_config.search_speed,
         host=_config.host,
         port=_config.port,
         file_extensions=_config.file_extensions,
@@ -1488,8 +1562,62 @@ async def index_progress(websocket: WebSocket) -> None:
             _index_progress_subscribers.remove(websocket)
 
 
+def _update_index_progress(data: dict) -> None:
+    """Update the module-level polling progress state from a WS broadcast event."""
+    global _index_progress
+
+    status = data.get("status", "")
+    current = data.get("current", 0)
+    total = data.get("total", 0)
+    file_path = data.get("file", "") or ""
+    message = data.get("message", "")
+    elapsed = time.time() - _index_start_time if _index_start_time else 0.0
+
+    # Map pipeline StatusType values to our state/phase model
+    phase_map = {
+        "discovery": ("discovering", "discovery"),
+        "parsing": ("indexing", "parsing"),
+        "chunking": ("indexing", "parsing"),
+        "embedding": ("indexing", "embedding"),
+        "storing": ("indexing", "storing"),
+        "complete": ("complete", ""),
+        "error": ("error", ""),
+        "skipped": ("indexing", "parsing"),
+    }
+    state, phase = phase_map.get(status, ("indexing", status))
+
+    percent = 0.0
+    if total > 0 and state not in ("idle", "discovering"):
+        percent = round(min(current / total * 100, 100.0), 1)
+
+    files_per_sec = 0.0
+    if elapsed > 0 and current > 0:
+        files_per_sec = round(current / elapsed, 1)
+
+    current_file = file_path.split("/")[-1] if file_path else ""
+
+    _index_progress = {
+        "state": state,
+        "phase": phase,
+        "processed": current,
+        "total": total,
+        "percent": percent,
+        "current_file": current_file,
+        "files_per_sec": files_per_sec,
+        "elapsed_sec": round(elapsed, 1),
+        "errors": _index_progress.get("errors", []),
+    }
+
+    # Append errors (keep last 20)
+    if status == "error" and message:
+        errors = list(_index_progress.get("errors", []))
+        errors.append({"file": current_file, "message": message})
+        _index_progress["errors"] = errors[-20:]
+
+
 async def _broadcast_progress(data: dict) -> None:
-    """Send a progress event to all connected WebSocket clients."""
+    """Send a progress event to all connected WebSocket clients and update polling state."""
+    _update_index_progress(data)
     dead: list[WebSocket] = []
     for ws in _index_progress_subscribers:
         try:

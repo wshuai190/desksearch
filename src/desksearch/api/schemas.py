@@ -61,10 +61,14 @@ class IndexStatus(BaseModel):
 
 
 class IndexRequest(BaseModel):
-    """Request to index specific paths."""
+    """Request to index specific paths.
+
+    If ``paths`` is omitted or empty, the server will index all configured
+    ``index_paths`` from settings.
+    """
 
     paths: list[str] = Field(
-        ..., min_length=1, description="List of file or directory paths to index"
+        default_factory=list, description="List of file or directory paths to index (empty = use configured folders)"
     )
 
 
@@ -76,6 +80,7 @@ class SettingsResponse(BaseModel):
     embedding_model: str
     chunk_size: int
     chunk_overlap: int
+    search_speed: str = "regular"
     host: str
     port: int
     file_extensions: list[str]
@@ -93,6 +98,7 @@ class SettingsUpdateRequest(BaseModel):
     index_paths: Optional[list[str]] = None
     chunk_size: Optional[int] = Field(default=None, ge=64, le=4096)
     chunk_overlap: Optional[int] = Field(default=None, ge=0, le=512)
+    search_speed: Optional[str] = Field(default=None, description="Speed tier: fast, regular, or pro")
     file_extensions: Optional[list[str]] = None
     max_file_size_mb: Optional[int] = Field(default=None, ge=1, le=1024)
     excluded_dirs: Optional[list[str]] = None

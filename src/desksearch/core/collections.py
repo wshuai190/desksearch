@@ -71,7 +71,7 @@ def build_doc_embeddings(
     doc_filenames: dict[int, str] = {}
 
     for doc in docs:
-        chunks = store.get_chunks_for_document(doc.id)
+        chunks = store.get_chunks(doc.id)
         if not chunks:
             continue
         chunk_vecs = [chunk_emb_map[c.id] for c in chunks if c.id in chunk_emb_map]
