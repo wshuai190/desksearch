@@ -678,11 +678,23 @@ def config_show(as_json: bool = False) -> None:
     table.add_column("Value")
     table.add_column("Description", style="dim")
 
+    from desksearch.config import STARBUCKS_TIERS
+
     field_descriptions = {f: Config.model_fields[f].description or "" for f in Config.model_fields}
 
     for key, value in data.items():
         desc = field_descriptions.get(key, "")
-        table.add_row(key, str(value), desc)
+        display_value = str(value)
+        # Annotate search_speed with tier details
+        if key == "search_speed" and value in STARBUCKS_TIERS:
+            layers, dim = STARBUCKS_TIERS[value]
+            tier_info = {
+                "fast": "fastest, smallest index",
+                "middle": "balanced speed/quality",
+                "pro": "maximum quality",
+            }
+            display_value = f"{value}  ({layers}-layer, {dim}d — {tier_info.get(value, '')})"
+        table.add_row(key, display_value, desc)
 
     console.print(table)
 
@@ -786,15 +798,20 @@ def config_set(key: str, value: str, as_json: bool) -> None:
 \b
 Examples:
   desksearch doctor
+  desksearch doctor --full        # Also load the embedding model (slower)
   desksearch doctor --json
 """)
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON for scripting")
-def doctor(as_json: bool) -> None:
+@click.option("--full", is_flag=True, help="Run full checks including model loading (slower)")
+def doctor(as_json: bool, full: bool) -> None:
     """Check the health of all DeskSearch components.
 
     Verifies that required Python packages are installed, the data directory
-    is accessible, the embedding model can be loaded, and the search indexes
-    are readable. Exits with code 1 if any check fails.
+    is accessible, the embedding model files exist on disk, and the search
+    indexes are readable. Exits with code 1 if any check fails.
+
+    Use --full to also load the embedding model and run a test inference
+    (this is slower as it initialises the ONNX runtime).
     """
     import importlib
     import shutil
@@ -844,17 +861,61 @@ def doctor(as_json: bool) -> None:
     except Exception as e:
         _check("Disk space", False, str(e))
 
-    # 4. Embedding model
-    try:
-        from desksearch.indexer.embedder import Embedder
-        config.resolve_starbucks_tier()
-        embedder = Embedder(config.embedding_model, embedding_dim=config.embedding_dim, embedding_layers=config.embedding_layers)
-        vec = embedder.embed_query("test")
-        ok = vec is not None and len(vec) > 0
-        tier = config.search_speed
-        _check(f"Embedding model ({config.embedding_model}, {tier})", ok, f"dim={len(vec)}")
-    except Exception as e:
-        _check(f"Embedding model ({config.embedding_model})", False, str(e))
+    # 4. Embedding model — fast file check by default, full load with --full
+    config.resolve_starbucks_tier()
+    tier = config.search_speed
+
+    if full:
+        # Full check: actually load the model and run inference
+        try:
+            from desksearch.indexer.embedder import Embedder
+            embedder = Embedder(config.embedding_model, embedding_dim=config.embedding_dim, embedding_layers=config.embedding_layers)
+            vec = embedder.embed_query("test")
+            ok = vec is not None and len(vec) > 0
+            _check(f"Embedding model ({config.embedding_model}, {tier})", ok, f"dim={len(vec)}, loaded & tested")
+        except Exception as e:
+            _check(f"Embedding model ({config.embedding_model})", False, str(e))
+    else:
+        # Fast check: verify model files exist on disk without loading
+        from desksearch.indexer.embedder import _STARBUCKS_ONNX_DIR, _STARBUCKS_ONNX_FILES
+        onnx_filename = _STARBUCKS_ONNX_FILES.get(tier)
+        if onnx_filename:
+            onnx_path = _STARBUCKS_ONNX_DIR / onnx_filename
+            if onnx_path.exists():
+                size_mb = onnx_path.stat().st_size / (1024 * 1024)
+                _check(
+                    f"Embedding model ({config.embedding_model}, {tier})",
+                    True,
+                    f"{onnx_path.name} ({size_mb:.1f} MB) — use --full to test inference",
+                )
+            else:
+                _check(
+                    f"Embedding model ({config.embedding_model}, {tier})",
+                    False,
+                    f"ONNX file not found: {onnx_path}",
+                )
+        else:
+            # Non-Starbucks model or unknown tier — check HuggingFace cache
+            from huggingface_hub import try_to_load_from_cache
+            try:
+                cached = try_to_load_from_cache(config.embedding_model, "config.json")
+                if cached and isinstance(cached, (str, Path)) and Path(cached).exists():
+                    model_dir = Path(cached).parent
+                    total_size = sum(f.stat().st_size for f in model_dir.rglob("*") if f.is_file())
+                    size_mb = total_size / (1024 * 1024)
+                    _check(
+                        f"Embedding model ({config.embedding_model}, {tier})",
+                        True,
+                        f"cached ({size_mb:.1f} MB) — use --full to test inference",
+                    )
+                else:
+                    _check(
+                        f"Embedding model ({config.embedding_model})",
+                        False,
+                        "Model not found in cache. Run with --full to download.",
+                    )
+            except Exception as e:
+                _check(f"Embedding model ({config.embedding_model})", False, str(e))
 
     # 5. Metadata store
     try:
@@ -958,12 +1019,15 @@ def serve(host: str | None, port: int | None, no_browser: bool) -> None:
     chunk_count = store.chunk_count()
     store.close()
 
+    from desksearch import __version__
+
     url = f"http://{host}:{port}"
     banner = (
-        f"[bold cyan]DeskSearch[/bold cyan]\n\n"
+        f"[bold cyan]DeskSearch[/bold cyan] [dim]v{__version__}[/dim]\n\n"
         f"  Search URL:  [link]{url}[/link]\n"
         f"  Documents:   [bold]{doc_count:,}[/bold] files indexed\n"
         f"  Chunks:      [bold]{chunk_count:,}[/bold] searchable chunks\n"
+        f"  Model:       {config.embedding_model} [dim]({config.search_speed} tier)[/dim]\n"
         f"  Data dir:    {config.data_dir}\n\n"
         f"  [dim]Press Ctrl+C to stop[/dim]"
     )

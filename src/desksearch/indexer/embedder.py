@@ -294,12 +294,14 @@ class Embedder:
 
         Subsequent loads use the local 6-layer model — faster startup, less disk.
         The full 12-layer model is never kept; only layers 0-5 are saved.
+        After saving, the full model is removed from HuggingFace cache.
         """
         from transformers import AutoTokenizer, AutoModel, AutoConfig
 
         local_path = self._get_local_model_path()
 
         if (local_path / "config.json").exists():
+            self._log_model_size(local_path)
             return local_path
 
         logger.info("First-time setup: downloading Starbucks model and saving 6-layer version...")
@@ -312,16 +314,44 @@ class Embedder:
         )
         model = AutoModel.from_pretrained(self.model_name, config=config)
         model.save_pretrained(local_path)
+        config.save_pretrained(local_path)
 
         # Save tokenizer too
         tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         tokenizer.save_pretrained(local_path)
 
         logger.info("Saved 6-layer Starbucks model to %s", local_path)
+        self._log_model_size(local_path)
+
         del model
-        import gc; gc.collect()
+        gc.collect()
+
+        # Clean up full 12-layer model from HuggingFace cache
+        self._cleanup_hf_cache()
 
         return local_path
+
+    @staticmethod
+    def _log_model_size(model_path: Path) -> None:
+        """Log the on-disk size of the local model directory."""
+        try:
+            total = sum(f.stat().st_size for f in model_path.iterdir() if f.is_file())
+            mb = total / (1024 * 1024)
+            logger.info("Local 6-layer model size: %.1f MB (%s)", mb, model_path)
+        except Exception:
+            pass
+
+    def _cleanup_hf_cache(self) -> None:
+        """Remove the full Starbucks model from HuggingFace cache to save disk space."""
+        import shutil
+        cache_dir = Path.home() / ".cache" / "huggingface" / "hub" / "models--ielabgroup--Starbucks-msmarco"
+        if cache_dir.exists():
+            try:
+                size_mb = sum(f.stat().st_size for f in cache_dir.rglob("*") if f.is_file()) / (1024 * 1024)
+                shutil.rmtree(cache_dir)
+                logger.info("Cleaned up full model from HuggingFace cache (freed %.1f MB)", size_mb)
+            except Exception as e:
+                logger.warning("Failed to clean HuggingFace cache: %s", e)
 
     def _load_starbucks(self) -> None:
         """Load Starbucks model with truncated layers for real speedup.
