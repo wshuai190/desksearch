@@ -2,7 +2,7 @@
 
 Supports three speed tiers via layer × dimension truncation:
   - fast:    2 layers, 32d  (~3x faster than full, tiny index)
-  - regular: 4 layers, 64d  (balanced — default)
+  - middle:  4 layers, 64d  (balanced — default)
   - pro:     6 layers, 128d (near full-model quality)
 
 Uses CLS token pooling (not mean pooling) — this is what Starbucks was trained with.
@@ -73,15 +73,15 @@ _STARBUCKS_ONNX_DIR = Path.home() / ".desksearch" / "models"
 # Mapping from tier name to ONNX filename (prefer INT8 for speed)
 _STARBUCKS_ONNX_FILES = {
     "fast": "starbucks-fast-int8.onnx",
-    "regular": "starbucks-regular-int8.onnx",
+    "middle": "starbucks-middle-int8.onnx",
     "pro": "starbucks-pro-int8.onnx",
 }
 
 # Optimal ONNX batch sizes per tier (profiled on Apple M-series)
-# regular-INT8: smaller batches are faster; fast-INT8: larger batches win
+# middle-INT8: smaller batches are faster; fast-INT8: larger batches win
 _STARBUCKS_ONNX_BATCH = {
     "fast": 128,
-    "regular": 32,
+    "middle": 32,
     "pro": 32,
 }
 
@@ -231,7 +231,7 @@ class Embedder:
 
         # Determine which ONNX file to use based on the Starbucks tier
         from desksearch.config import Config
-        tier = "regular"  # default
+        tier = "middle"  # default
         for tier_name, (layers, dim) in STARBUCKS_TIERS.items():
             if layers == self._target_layers and dim == self._target_dim:
                 tier = tier_name

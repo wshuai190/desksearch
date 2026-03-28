@@ -17,9 +17,9 @@ All notable changes to DeskSearch are documented here.
 - **Export formats** — results as JSON, CSV, or plain text
 - **Favorites system** — bookmark important files via API
 - **Recent files** — track recently opened documents
-- **ONNX model export** — Starbucks model exported to ONNX with INT8 quantization
+- **ONNX model export** — [Starbucks](https://arxiv.org/abs/2410.13230) 2D Matryoshka model exported to ONNX with INT8 quantization
   - Fast tier: 36MB (INT8) / 145MB (FP32)
-  - Regular tier: 50MB (INT8) / 199MB (FP32)
+  - Middle tier: 50MB (INT8) / 199MB (FP32)
   - Pro tier: 64MB (INT8) / 253MB (FP32)
 - **Rust native binary** — complete rewrite of hot paths in Rust
   - 13MB standalone binary
@@ -57,7 +57,7 @@ All notable changes to DeskSearch are documented here.
 ## [0.5.0] - 2026-03-25
 
 ### Added
-- **Starbucks 2D Matryoshka embeddings** — layer and dimension truncation with 3 speed tiers (fast/regular/pro)
+- **Starbucks 2D Matryoshka embeddings** — layer and dimension truncation with 3 speed tiers (fast/middle/pro); see [paper](https://arxiv.org/abs/2410.13230)
 - Local model caching — loads only the layers needed per tier, no re-download
 - Mock embedder for API tests — eliminates torch/FAISS segfault on Apple Silicon cleanup
 - `desksearch benchmark` command for reproducible performance testing

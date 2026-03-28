@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Export Starbucks model to ONNX for 3 tiers (fast/regular/pro).
+"""Export Starbucks model to ONNX for 3 tiers (fast/middle/pro).
 
 Each tier uses a different number of transformer layers and output dimensions:
-  - fast:    2 layers, 32d
-  - regular: 4 layers, 64d
-  - pro:     6 layers, 128d
+  - fast:   2 layers, 32d
+  - middle: 4 layers, 64d
+  - pro:    6 layers, 128d
 
 The full 6-layer model is loaded once from ~/.desksearch/models/starbucks-6layer,
 then subsets of layers are used for each tier via config modification.
@@ -24,7 +24,7 @@ SOURCE_MODEL = MODEL_DIR / "starbucks-6layer"
 
 TIERS = [
     {"name": "fast",    "layers": 2, "dim": 32,  "output": "starbucks-fast.onnx"},
-    {"name": "regular", "layers": 4, "dim": 64,  "output": "starbucks-regular.onnx"},
+    {"name": "middle",  "layers": 4, "dim": 64,  "output": "starbucks-middle.onnx"},
     {"name": "pro",     "layers": 6, "dim": 128, "output": "starbucks-pro.onnx"},
 ]
 

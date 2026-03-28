@@ -361,10 +361,10 @@ export default function Settings() {
           title="General"
           description="Basic configuration for your DeskSearch instance"
         />
-        <SettingRow label="Embedding Model" description="The AI model used to understand your files">
-          <span className="text-sm font-mono text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg">
+        <SettingRow label="Embedding Model" description="Powered by Starbucks 2D Matryoshka embeddings — a research-backed model enabling flexible layer × dimension truncation (ECIR 2026)">
+          <a href="https://arxiv.org/abs/2410.13230" target="_blank" rel="noopener noreferrer" className="text-sm font-mono text-accent-blue hover:underline bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg">
             {settings.embedding_model}
-          </span>
+          </a>
         </SettingRow>
         <SettingRow label="Storage Location" description="Where DeskSearch keeps its index">
           <span className="text-xs font-mono text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg max-w-[200px] truncate block" title={settings.data_dir}>

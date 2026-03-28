@@ -18,7 +18,7 @@ DEFAULT_EMBEDDING_MODEL = "ielabgroup/Starbucks-msmarco"
 # From the paper: "Starbucks: Improved Training for 2D Matryoshka Embeddings" (ECIR 2026)
 STARBUCKS_TIERS = {
     "fast": (2, 32),       # ~3x faster, tiny index, good for local file search
-    "regular": (4, 64),    # balanced speed/quality
+    "middle": (4, 64),     # balanced speed/quality
     "pro": (6, 128),       # max quality (6 layers saved locally, nothing larger needed)
 }
 DEFAULT_CHUNK_SIZE = 512
@@ -36,8 +36,8 @@ class Config(BaseModel):
     chunk_size: int = Field(default=DEFAULT_CHUNK_SIZE, description="Characters per chunk")
     chunk_overlap: int = Field(default=DEFAULT_CHUNK_OVERLAP, description="Overlap between chunks")
     search_speed: str = Field(
-        default="regular",
-        description="Search speed tier: 'fast' (2-layer, 32d), 'regular' (4-layer, 64d), 'pro' (6-layer, 128d)",
+        default="middle",
+        description="Search speed tier: 'fast' (2-layer, 32d), 'middle' (4-layer, 64d), 'pro' (6-layer, 128d)",
     )
     embedding_dim: int = Field(
         default=64,

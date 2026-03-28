@@ -74,7 +74,7 @@ Available as a **Python package** (`pip install desksearch`) and a **standalone 
 | 👁 | **Live reindexing** | Built-in file watcher auto-detects changes — your index is always current |
 | 🎨 | **Beautiful web UI** | React frontend with dark mode, live search, file preview, and keyboard shortcuts |
 | 🦀 | **Rust core** | 13MB self-contained binary with PDF/DOCX/PPTX/XLSX parsers, hybrid BM25+dense search, embedded frontend |
-| ☕ | **3 speed tiers** | **Fast** (2-layer, 32d) · **Regular** (4-layer, 64d) · **Pro** (6-layer, 128d) — you pick the trade-off |
+| ☕ | **3 speed tiers** | **Fast** (2-layer, 32d) · **Middle** (4-layer, 64d) · **Pro** (6-layer, 128d) — you pick the trade-off |
 | 🔌 | **Connector plugins** | Local files, email (.eml/.mbox), Chrome bookmarks, Slack exports — extensible architecture |
 | ⚙️ | **ONNX acceleration** | 10× embedding speedup (171 chunks/sec) with INT8 quantization support |
 | 📊 | **Advanced filters** | Filter by file type, date range, size · Sort by relevance, date, size, name · Export as JSON/CSV/text |
@@ -156,6 +156,28 @@ All commands support `--json` for scripting and automation.
 
 ---
 
+## Powered by Starbucks Embeddings
+
+DeskSearch uses the [Starbucks](https://huggingface.co/ielabgroup/Starbucks-msmarco) 2D Matryoshka embedding model, which enables flexible layer × dimension truncation for speed/quality trade-offs.
+
+**Paper:** [Starbucks: Improved Training for 2D Matryoshka Embeddings](https://arxiv.org/abs/2410.13230)
+*Shuai Wang, Shengyao Zhuang, Bevan Koopman, Guido Zuccon* — ECIR 2026
+
+> Unlike traditional embeddings that require fixed dimensions, Starbucks lets you choose both the number of transformer layers AND the embedding dimension at inference time — no retraining needed. DeskSearch leverages this to offer three speed tiers from a single model.
+
+If you use DeskSearch or the Starbucks model in your research, please cite:
+
+```bibtex
+@inproceedings{wang2026starbucks,
+  title={Starbucks: Improved Training for 2D Matryoshka Embeddings},
+  author={Wang, Shuai and Zhuang, Shengyao and Koopman, Bevan and Zuccon, Guido},
+  booktitle={ECIR},
+  year={2026}
+}
+```
+
+---
+
 ## Architecture
 
 DeskSearch runs **hybrid retrieval** — every query hits a [Tantivy](https://github.com/quickwit-oss/tantivy) BM25 index and a FAISS dense vector index in parallel, then merges results via Reciprocal Rank Fusion (RRF). Embeddings come from the Starbucks 2D Matryoshka model with layer and dimension truncation, running on ONNX Runtime for **10× speedup** over PyTorch (171 chunks/sec vs 17). The indexing pipeline parses files across 6 parallel workers, chunks at sentence boundaries, and embeds in batches of 256 for maximum throughput. A **connector plugin system** (v0.6.0) lets you pull in data from local files, email, Chrome bookmarks, and Slack exports via a unified API.
@@ -204,7 +226,7 @@ Manage connectors via the API (`/api/connectors/v2/`) or the web UI settings pan
 | Tier | Layers | Dimensions | Best for |
 |---|---|---|---|
 | `fast` | 2 | 32 | Large corpora, older hardware |
-| `regular` | 4 | 64 | **Default** — balanced speed and quality |
+| `middle` | 4 | 64 | **Default** — balanced speed and quality |
 | `pro` | 6 | 128 | Best accuracy, research use |
 
 ```bash

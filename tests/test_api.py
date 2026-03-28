@@ -352,7 +352,7 @@ async def test_settings_includes_search_speed(client):
     assert resp.status_code == 200
     body = resp.json()
     assert "search_speed" in body, "search_speed missing from settings response"
-    assert body["search_speed"] in ("fast", "regular", "pro")
+    assert body["search_speed"] in ("fast", "middle", "pro")
 
 
 @pytest.mark.anyio

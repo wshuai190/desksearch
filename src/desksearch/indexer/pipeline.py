@@ -48,7 +48,7 @@ PARSE_LOOKAHEAD = 16
 PARSE_TIMEOUT_SEC = 30
 
 # Inner ONNX batch size: how many sequences per session.run() call.
-# For Starbucks ONNX INT8 (regular tier): 32 is optimal on Apple M-series.
+# For Starbucks ONNX INT8 (middle tier): 32 is optimal on Apple M-series.
 # For fast tier: 128 is optimal. The embedder auto-selects via _onnx_optimal_batch.
 # This is the upper cap; the embedder may use a smaller batch internally.
 ONNX_INNER_BATCH = 64

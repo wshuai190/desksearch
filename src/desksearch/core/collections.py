@@ -107,7 +107,7 @@ def cluster_documents(
     doc_ids = list(doc_embeddings.keys())
     X = np.stack([doc_embeddings[d] for d in doc_ids]).astype(np.float32)
 
-    # Normalize embeddings for cosine similarity
+    # Normalize embeddings for clustering (cosine-like similarity)
     norms = np.linalg.norm(X, axis=1, keepdims=True) + 1e-8
     X_norm = X / norms
 
@@ -170,7 +170,7 @@ def find_duplicates(
 ) -> list[dict]:
     """Find document pairs with very similar content (potential duplicates).
 
-    Uses cosine similarity on document embeddings. Returns pairs above threshold.
+    Uses normalized dot-product similarity on document embeddings. Returns pairs above threshold.
 
     Args:
         doc_embeddings: {doc_id -> embedding}
@@ -185,7 +185,7 @@ def find_duplicates(
     doc_ids = list(doc_embeddings.keys())
     X = np.stack([doc_embeddings[d] for d in doc_ids]).astype(np.float32)
 
-    # Normalize for cosine similarity
+    # Normalize for pairwise similarity comparison
     norms = np.linalg.norm(X, axis=1, keepdims=True) + 1e-8
     X_norm = X / norms
 

@@ -1,4 +1,4 @@
-"""Dense vector index using FAISS for cosine-similarity search.
+"""Dense vector index using FAISS for dot-product (inner product) search.
 
 Supports three index types, auto-selected by corpus size:
 - IndexFlatIP  for small collections (<HNSW_THRESHOLD vectors): exact search, simple.
@@ -76,7 +76,7 @@ IVF_NPROBE = 16    # cells to probe at search time
 
 
 class DenseIndex:
-    """FAISS-backed dense vector index with cosine similarity search.
+    """FAISS-backed dense vector index with dot-product (inner product) search.
 
     Stores float32 embeddings and maps integer FAISS ids to string doc_ids.
     Persists both the FAISS index and the id mapping to disk.
@@ -391,10 +391,12 @@ class DenseIndex:
 
     @staticmethod
     def _normalize(vectors: np.ndarray) -> np.ndarray:
-        """L2-normalize vectors so inner product == cosine similarity."""
-        norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-        norms = np.maximum(norms, 1e-10)
-        return vectors / norms
+        """Pass-through (no normalization).
+
+        The Starbucks 2D Matryoshka model is trained with dot-product
+        similarity — embeddings should NOT be L2-normalized.
+        """
+        return vectors
 
     def add(self, doc_id: str, embedding: np.ndarray) -> None:
         """Add a single document embedding. Replaces if doc_id exists."""
@@ -471,10 +473,10 @@ class DenseIndex:
     # ------------------------------------------------------------------
 
     def search(self, query_embedding: np.ndarray, top_k: int = 10) -> list[tuple[str, float]]:
-        """Search by cosine similarity, returning (doc_id, score) pairs.
+        """Search by dot-product similarity, returning (doc_id, score) pairs.
 
         Returns an empty list (rather than raising) if the index is
-        unavailable or empty.  Scores are cosine similarities in [-1, 1].
+        unavailable or empty.  Scores are dot-product similarities.
         Soft-deleted vectors are silently filtered from results.
         """
         if not self.available or self._index is None:
