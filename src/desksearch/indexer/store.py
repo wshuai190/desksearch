@@ -649,58 +649,6 @@ class MetadataStore:
             self.conn.execute("VACUUM")
         return True
 
-    def disk_stats(self) -> dict:
-        """Return disk usage and fragmentation stats for the SQLite database.
-
-        FIX: This method was referenced by __main__.py stats command but was
-        missing from the class.
-
-        Returns:
-            Dict with ``db_size_bytes`` and ``frag_ratio`` keys.
-        """
-        db_size = 0
-        if self.db_path.exists():
-            db_size = self.db_path.stat().st_size
-
-        # Fragmentation: compare page_count * page_size to actual file size.
-        # freelist_count pages are allocated but unused.
-        frag_ratio = 0.0
-        try:
-            page_count = self.conn.execute("PRAGMA page_count").fetchone()[0]
-            freelist_count = self.conn.execute("PRAGMA freelist_count").fetchone()[0]
-            if page_count > 0:
-                frag_ratio = freelist_count / page_count
-        except Exception:
-            pass
-
-        return {
-            "db_size_bytes": db_size,
-            "frag_ratio": frag_ratio,
-        }
-
-    def vacuum_if_fragmented(self, threshold: float = 0.1) -> bool:
-        """Run VACUUM if fragmentation exceeds the threshold.
-
-        FIX: This method was called in server.py startup but was missing
-        from the class.
-
-        Args:
-            threshold: Fragmentation ratio above which to VACUUM (default 10%).
-
-        Returns:
-            True if VACUUM was run, False otherwise.
-        """
-        stats = self.disk_stats()
-        if stats["frag_ratio"] >= threshold:
-            with self._write_lock:
-                self.conn.execute("VACUUM")
-            logger.info(
-                "VACUUM complete: fragmentation was %.1f%%",
-                stats["frag_ratio"] * 100,
-            )
-            return True
-        return False
-
     def ping(self) -> bool:
         """Return True if the database connection is healthy."""
         try:
