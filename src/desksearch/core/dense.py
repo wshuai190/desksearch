@@ -400,8 +400,21 @@ class DenseIndex:
         """Add a single document embedding. Replaces if doc_id exists."""
         self.add_batch([(doc_id, embedding)])
 
-    def add_batch(self, items: list[tuple[str, np.ndarray]]) -> None:
-        """Add multiple (doc_id, embedding) pairs. Replaces existing doc_ids."""
+    def add_batch(
+        self,
+        items: list[tuple[str, np.ndarray]],
+        *,
+        defer_save: bool = False,
+    ) -> None:
+        """Add multiple (doc_id, embedding) pairs. Replaces existing doc_ids.
+
+        Args:
+            items: List of (doc_id, embedding) pairs.
+            defer_save: If True, skip persisting to disk after this batch.
+                Caller must call ``save()`` when done.  Use during bulk
+                indexing to avoid writing the full FAISS index after every
+                micro-batch (major I/O win for large imports).
+        """
         if not items or not self.available or self._index is None:
             return
 
@@ -430,7 +443,8 @@ class DenseIndex:
 
             id_array = np.array(int_ids, dtype=np.int64)
             self._index.add_with_ids(vectors, id_array)
-            self._save_locked()
+            if not defer_save:
+                self._save_locked()
 
         # Auto-upgrade index type if corpus crossed a threshold.
         # Done outside the lock to avoid deadlock (maybe_upgrade_index takes lock).

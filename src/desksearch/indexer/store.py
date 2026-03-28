@@ -452,6 +452,21 @@ class MetadataStore:
         row = self.conn.execute("SELECT COUNT(*) as cnt FROM chunks").fetchone()
         return row["cnt"]
 
+    def get_documents_by_ids(self, doc_ids: list[int]) -> dict[int, DocumentRecord]:
+        """Batch-fetch documents by a list of IDs.
+
+        Returns a dict mapping doc_id → DocumentRecord. Missing IDs are omitted.
+        More efficient than N individual ``get_document_by_id`` calls.
+        """
+        if not doc_ids:
+            return {}
+        placeholders = ",".join("?" * len(doc_ids))
+        rows = self.conn.execute(
+            f"SELECT * FROM documents WHERE id IN ({placeholders})",
+            doc_ids,
+        ).fetchall()
+        return {row["id"]: self._row_to_doc(row) for row in rows}
+
     def get_chunks_by_ids(self, chunk_ids: list[int]) -> dict[int, "ChunkRecord"]:
         """Batch-fetch chunks by a list of IDs.
 
@@ -586,6 +601,105 @@ class MetadataStore:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def disk_stats(self) -> dict:
+        """Return disk statistics for the database file.
+
+        Returns a dict with:
+        - ``db_size_bytes``: total file size on disk
+        - ``page_count``: SQLite page count
+        - ``freelist_count``: unused pages (reclaimable via VACUUM)
+        - ``frag_ratio``: fraction of pages that are free (0.0–1.0)
+        """
+        try:
+            page_count = self.conn.execute("PRAGMA page_count").fetchone()[0]
+            freelist = self.conn.execute("PRAGMA freelist_count").fetchone()[0]
+            page_size = self.conn.execute("PRAGMA page_size").fetchone()[0]
+        except Exception:
+            return {
+                "db_size_bytes": self.db_path.stat().st_size if self.db_path.exists() else 0,
+                "page_count": 0,
+                "freelist_count": 0,
+                "frag_ratio": 0.0,
+            }
+
+        db_size = page_count * page_size
+        frag = freelist / page_count if page_count > 0 else 0.0
+        return {
+            "db_size_bytes": db_size,
+            "page_count": page_count,
+            "freelist_count": freelist,
+            "frag_ratio": frag,
+        }
+
+    def vacuum_if_fragmented(self, threshold: float = 0.1) -> bool:
+        """Run VACUUM if the database is more than *threshold* fragmented.
+
+        Returns True if VACUUM was performed.
+        """
+        stats = self.disk_stats()
+        if stats["frag_ratio"] < threshold:
+            return False
+        logger.info(
+            "SQLite fragmentation %.1f%% exceeds %.0f%% threshold — running VACUUM",
+            stats["frag_ratio"] * 100,
+            threshold * 100,
+        )
+        with self._write_lock:
+            self.conn.execute("VACUUM")
+        return True
+
+    def disk_stats(self) -> dict:
+        """Return disk usage and fragmentation stats for the SQLite database.
+
+        FIX: This method was referenced by __main__.py stats command but was
+        missing from the class.
+
+        Returns:
+            Dict with ``db_size_bytes`` and ``frag_ratio`` keys.
+        """
+        db_size = 0
+        if self.db_path.exists():
+            db_size = self.db_path.stat().st_size
+
+        # Fragmentation: compare page_count * page_size to actual file size.
+        # freelist_count pages are allocated but unused.
+        frag_ratio = 0.0
+        try:
+            page_count = self.conn.execute("PRAGMA page_count").fetchone()[0]
+            freelist_count = self.conn.execute("PRAGMA freelist_count").fetchone()[0]
+            if page_count > 0:
+                frag_ratio = freelist_count / page_count
+        except Exception:
+            pass
+
+        return {
+            "db_size_bytes": db_size,
+            "frag_ratio": frag_ratio,
+        }
+
+    def vacuum_if_fragmented(self, threshold: float = 0.1) -> bool:
+        """Run VACUUM if fragmentation exceeds the threshold.
+
+        FIX: This method was called in server.py startup but was missing
+        from the class.
+
+        Args:
+            threshold: Fragmentation ratio above which to VACUUM (default 10%).
+
+        Returns:
+            True if VACUUM was run, False otherwise.
+        """
+        stats = self.disk_stats()
+        if stats["frag_ratio"] >= threshold:
+            with self._write_lock:
+                self.conn.execute("VACUUM")
+            logger.info(
+                "VACUUM complete: fragmentation was %.1f%%",
+                stats["frag_ratio"] * 100,
+            )
+            return True
+        return False
 
     def ping(self) -> bool:
         """Return True if the database connection is healthy."""

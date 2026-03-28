@@ -1,6 +1,7 @@
 """FastAPI application factory for DeskSearch."""
 import logging
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
@@ -135,10 +136,48 @@ def create_app(
     )
     set_watcher(watcher)
 
+    # --- Lifespan: replaces deprecated @app.on_event("startup"/"shutdown") ---
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Startup: start file watcher and auto-index if empty
+        try:
+            watcher.start()
+            logger.info("File watcher started for %d paths", len(config.index_paths))
+        except Exception:
+            logger.exception("Failed to start file watcher")
+
+        # Auto-index on startup if folders are configured but nothing indexed
+        if store and store.document_count() == 0 and config.index_paths:
+            logger.info("No indexed files found. Auto-indexing configured folders...")
+            from desksearch.api.schemas import IndexRequest
+            req = IndexRequest(paths=[str(p) for p in config.index_paths])
+            try:
+                await trigger_index(req)
+            except Exception as e:
+                logger.warning("Auto-index failed: %s", e)
+
+        yield  # App is running
+
+        # Shutdown: stop file watcher
+        try:
+            watcher.stop()
+            logger.info("File watcher stopped")
+        except Exception:
+            logger.exception("Failed to stop file watcher")
+
+    # Import trigger_index for auto-index in lifespan
+    from desksearch.api.routes import trigger_index
+
+    # Use ORJSONResponse for ~5x faster JSON serialization.  orjson is already
+    # a dependency; this makes it the default for all JSON responses.
+    from fastapi.responses import ORJSONResponse
+
     app = FastAPI(
         title="DeskSearch",
         description="Private semantic search engine for your local files",
         version="0.1.0",
+        lifespan=lifespan,
+        default_response_class=ORJSONResponse,
     )
 
     # --- Request timing middleware ---
@@ -188,42 +227,6 @@ def create_app(
     app.include_router(ws_router)
     app.include_router(integrations_router)
     app.include_router(connector_router)
-
-    # Start file watcher on startup, stop on shutdown
-    @app.on_event("startup")
-    async def _start_watcher():
-        try:
-            watcher.start()
-            logger.info("File watcher started for %d paths", len(config.index_paths))
-        except Exception:
-            logger.exception("Failed to start file watcher")
-
-    @app.on_event("shutdown")
-    async def _stop_watcher():
-        try:
-            watcher.stop()
-            logger.info("File watcher stopped")
-        except Exception:
-            logger.exception("Failed to stop file watcher")
-
-    # Auto-index on startup if folders are configured but nothing is indexed
-    @app.on_event("startup")
-    async def _auto_index_if_empty():
-        import asyncio
-        if store and store.document_count() == 0 and config.index_paths:
-            import logging
-            logger = logging.getLogger("desksearch")
-            logger.info("No indexed files found. Auto-indexing configured folders...")
-            # Trigger indexing via the API endpoint internally
-            from desksearch.api.schemas import IndexRequest
-            req = IndexRequest(paths=[str(p) for p in config.index_paths])
-            try:
-                await trigger_index(req)
-            except Exception as e:
-                logger.warning(f"Auto-index failed: {e}")
-
-    # Import trigger_index for auto-index
-    from desksearch.api.routes import trigger_index
 
     # Serve built React UI if available
     if UI_DIST_DIR.is_dir():

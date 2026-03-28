@@ -24,10 +24,11 @@ export interface IndexStatus {
 }
 
 export interface IndexingProgress {
+  status: string;       // discovery | parsing | embedding | complete | error
+  file: string | null;
+  message: string;
   current: number;
   total: number;
-  current_file: string;
-  phase: string;
 }
 
 export interface SearchFilters {

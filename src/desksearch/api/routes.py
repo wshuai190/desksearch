@@ -73,7 +73,12 @@ _doc_emb_loaded: bool = False
 
 
 def _warm_from_store() -> None:
-    """Reload search engine from store after index changes."""
+    """Reload search engine from store after index changes.
+
+    FIX: Previously called nonexistent _store.get_chunks_for_document() —
+    corrected to use get_chunks(doc_id). Also replaced O(N*M) linear scan
+    with O(1) dict lookup for chunk_id → embedding index mapping.
+    """
     if _store is None or _search_engine is None:
         return
     import numpy as np
@@ -83,20 +88,17 @@ def _warm_from_store() -> None:
     if emb_file.exists() and ids_file.exists():
         embeddings = np.load(str(emb_file)).astype(np.float32)
         chunk_ids = np.load(str(ids_file))
+        # Build O(1) lookup: chunk_id → index in embeddings array
+        id_to_idx = {int(cid): i for i, cid in enumerate(chunk_ids)}
         # Get texts from store
         all_docs = _store.all_documents()
         for doc in all_docs:
-            chunks = _store.get_chunks_for_document(doc.id)
+            # FIX: was get_chunks_for_document (nonexistent); correct is get_chunks
+            chunks = _store.get_chunks(doc.id)
             for chunk in chunks:
-                text = chunk.text
-                cid = str(chunk.id)
-                idx = None
-                for i, stored_id in enumerate(chunk_ids):
-                    if stored_id == chunk.id:
-                        idx = i
-                        break
+                idx = id_to_idx.get(chunk.id)
                 if idx is not None and idx < len(embeddings):
-                    _search_engine.add_documents([(cid, text, embeddings[idx])])
+                    _search_engine.add_documents([(str(chunk.id), chunk.text, embeddings[idx])])
 
 
 def set_config(config: Config) -> None:
@@ -126,6 +128,27 @@ def set_watcher(watcher) -> None:
     """Inject the file watcher instance at startup."""
     global _watcher
     _watcher = watcher
+
+
+def _compute_index_size_mb() -> float:
+    """Compute total index size in MB (metadata.db + bm25/ + dense/ + embeddings/)."""
+    import os
+    if _config is None:
+        return 0.0
+    data_dir = _config.data_dir
+    total = 0
+    for name in ("metadata.db", "metadata.db-wal", "metadata.db-shm",
+                 "analytics.db", "analytics.db-wal", "analytics.db-shm"):
+        p = data_dir / name
+        if p.exists():
+            total += p.stat().st_size
+    for subdir in ("bm25", "dense", "embeddings"):
+        d = data_dir / subdir
+        if d.exists():
+            for root, _, files in os.walk(d):
+                for f in files:
+                    total += (Path(root) / f).stat().st_size
+    return round(total / (1024 * 1024), 2)
 
 
 def _ensure_doc_embeddings() -> None:
@@ -202,27 +225,36 @@ async def search(
         return empty_resp
 
     # Embed the query
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # FIX: use get_running_loop instead of deprecated get_event_loop
     query_embedding = await loop.run_in_executor(None, _embedder.embed_query, q)
 
     # Fetch extra candidates to compensate for deduplication and filtering.
     candidate_count = limit * 4
     raw_results = await _search_engine.search(q, query_embedding, top_k=candidate_count)
 
-    # --- Pre-pass: resolve chunk → file metadata for all candidates ---
-    chunk_meta: dict[str, tuple] = {}
+    # --- Pre-pass: batch-resolve chunk → file metadata for all candidates ---
+    # Collect all chunk IDs, fetch in two batch queries instead of 2N individual ones.
+    _chunk_ids_raw: list[tuple[str, int]] = []
     for r in raw_results:
         try:
-            chunk_id = int(r.doc_id)
+            _chunk_ids_raw.append((r.doc_id, int(r.doc_id)))
         except (ValueError, TypeError):
             continue
-        chunk = _store.get_chunk_by_id(chunk_id)
+
+    chunk_map = _store.get_chunks_by_ids([cid for _, cid in _chunk_ids_raw])
+    # Gather unique doc_ids from chunks
+    _doc_ids_needed = list({c.doc_id for c in chunk_map.values()})
+    doc_map = _store.get_documents_by_ids(_doc_ids_needed) if _doc_ids_needed else {}
+
+    chunk_meta: dict[str, tuple] = {}
+    for doc_id_str, chunk_id_int in _chunk_ids_raw:
+        chunk = chunk_map.get(chunk_id_int)
         if chunk is None:
             continue
-        doc = _store.get_document_by_id(chunk.doc_id)
+        doc = doc_map.get(chunk.doc_id)
         if doc is None:
             continue
-        chunk_meta[r.doc_id] = (chunk, doc)
+        chunk_meta[doc_id_str] = (chunk, doc)
 
     # --- Compute per-chunk boosts (filename match + recency) ---
     query_tokens = set(re.findall(r"\w+", q.lower()))
@@ -531,21 +563,25 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
 
     async def _run_index() -> None:
         global _indexing
+        index_start = time.time()
+        total_indexed = 0
         try:
             import queue
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()  # FIX: use get_running_loop instead of deprecated get_event_loop
             cumulative_done = 0
             cumulative_total = 0
 
-            # First pass: count total files across all folders for accurate progress
+            # Pre-discover files across all folders using the pipeline's
+            # discover_files() (which respects extension/exclusion filters)
+            # so the total is accurate rather than inflated.
             for p in request.paths:
                 path = Path(p).expanduser().resolve()
                 if path.is_dir():
                     try:
-                        count = sum(1 for _ in path.rglob("*") if _.is_file())
-                        cumulative_total += count
+                        discovered = _pipeline.discover_files(path)
+                        cumulative_total += len(discovered)
                     except Exception:
-                        cumulative_total += 100  # estimate
+                        cumulative_total += 0  # will be corrected by per-folder totals
                 else:
                     cumulative_total += 1
 
@@ -557,7 +593,7 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
                     gen = _pipeline.index_file(path)
 
                 progress_queue: queue.Queue = queue.Queue()
-                folder_last_current = 0
+                folder_total = 0
 
                 def _drain_generator(g, q):
                     """Drain a generator, pushing status to queue."""
@@ -583,12 +619,18 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
                         continue
                     if status is None:
                         break
-                    folder_last_current = status.current or 0
+
+                    # Track the per-folder total from the pipeline's own count
+                    if status.total > 0:
+                        folder_total = status.total
+
                     current = status.current or 0
                     total = status.total or 0
-                    # Use cumulative totals, but don't send 0/0 to frontend
+
+                    # Use cumulative offsets for multi-folder progress
                     broadcast_current = cumulative_done + current
                     broadcast_total = cumulative_total if cumulative_total > 0 else total
+
                     await _broadcast_progress({
                         "status": status.status.value,
                         "file": status.file,
@@ -598,9 +640,17 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
                     })
 
                 await task
-                cumulative_done += folder_last_current
+                cumulative_done += folder_total
+                total_indexed = cumulative_done
         except Exception:
             logger.exception("Indexing failed")
+            await _broadcast_progress({
+                "status": "error",
+                "file": None,
+                "message": "Indexing failed unexpectedly",
+                "current": 0,
+                "total": 0,
+            })
         finally:
             _indexing = False
             global _doc_emb_loaded
@@ -612,7 +662,15 @@ async def trigger_index(request: IndexRequest) -> IndexStatus:
                     logger.info("Search index saved to disk")
                 except Exception:
                     logger.exception("Failed to save search index")
-            await _broadcast_progress({"status": "complete"})
+            elapsed = int(time.time() - index_start)
+            doc_count = _store.document_count() if _store else total_indexed
+            await _broadcast_progress({
+                "status": "complete",
+                "file": None,
+                "message": f"Done: {doc_count} files indexed in {elapsed}s",
+                "current": doc_count,
+                "total": doc_count,
+            })
 
     asyncio.create_task(_run_index())
 
@@ -639,17 +697,8 @@ async def status() -> IndexStatus:
     doc_count = _store.document_count() if _store else 0
     chunk_count = _store.chunk_count() if _store else 0
 
-    # Compute index size from data_dir
-    index_size_mb = 0.0
-    try:
-        data_dir = _config.data_dir
-        if data_dir.exists():
-            total_bytes = sum(
-                f.stat().st_size for f in data_dir.rglob("*") if f.is_file()
-            )
-            index_size_mb = round(total_bytes / (1024 * 1024), 2)
-    except OSError:
-        pass
+    # Compute index size from data_dir (exclude models/ dir and config files)
+    index_size_mb = _compute_index_size_mb()
 
     return IndexStatus(
         total_documents=doc_count,
@@ -1284,7 +1333,7 @@ async def get_collections(
         return CollectionsResponse()
 
     # Load doc embeddings
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # FIX: use get_running_loop instead of deprecated get_event_loop
     await loop.run_in_executor(None, _ensure_doc_embeddings)
 
     if not _doc_embeddings:
@@ -1330,7 +1379,7 @@ async def find_duplicates_endpoint(
     if _store is None:
         return DuplicatesResponse()
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # FIX: use get_running_loop instead of deprecated get_event_loop
     await loop.run_in_executor(None, _ensure_doc_embeddings)
 
     if not _doc_embeddings:
@@ -1369,7 +1418,7 @@ async def get_related_docs(
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # FIX: use get_running_loop instead of deprecated get_event_loop
     await loop.run_in_executor(None, _ensure_doc_embeddings)
 
     if not _doc_embeddings:
@@ -1612,7 +1661,7 @@ async def onboarding_setup(request: dict) -> dict:
         async def _run_onboarding_index() -> None:
             global _indexing
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()  # FIX: use get_running_loop instead of deprecated get_event_loop
                 for p in valid_paths:
                     path = Path(p)
                     if not path.is_dir():
@@ -1884,7 +1933,7 @@ async def sync_connector(connector_name: str) -> dict:
     connector.setup(plugin_cfg)
 
     # Fetch documents
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # FIX: use get_running_loop instead of deprecated get_event_loop
     try:
         docs = await loop.run_in_executor(None, connector.fetch)
     except Exception as exc:

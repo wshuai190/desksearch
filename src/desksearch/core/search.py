@@ -360,16 +360,26 @@ class HybridSearchEngine:
             self._cache.clear()
 
     def add_documents(
-        self, docs: list[tuple[str, str, np.ndarray]]
+        self,
+        docs: list[tuple[str, str, np.ndarray]],
+        *,
+        defer_save: bool = False,
     ) -> None:
-        """Batch-index documents as (doc_id, text, embedding) triples."""
+        """Batch-index documents as (doc_id, text, embedding) triples.
+
+        Args:
+            docs: List of (doc_id, text, embedding) triples.
+            defer_save: If True, skip persisting the FAISS index to disk.
+                Caller must call ``save()`` when done.  Use during bulk
+                indexing to avoid O(N²) I/O from saving after every batch.
+        """
         if not docs:
             return
         bm25_batch = [(doc_id, text) for doc_id, text, _ in docs]
         dense_batch = [(doc_id, emb) for doc_id, _, emb in docs]
 
         self.bm25.add_documents(bm25_batch)
-        self.dense.add_batch(dense_batch)
+        self.dense.add_batch(dense_batch, defer_save=defer_save)
 
         for doc_id, text, _ in docs:
             self._doc_texts[doc_id] = text
@@ -463,7 +473,8 @@ class HybridSearchEngine:
                 logger.debug("Cache hit for query %r", query_norm)
                 return cached
 
-        loop = asyncio.get_event_loop()
+        # FIX: use get_running_loop() instead of deprecated get_event_loop()
+        loop = asyncio.get_running_loop()
 
         results = await loop.run_in_executor(
             None,

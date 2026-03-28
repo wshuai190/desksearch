@@ -96,7 +96,7 @@ async def _run_search(q: str, type_filter: Optional[str], limit: int) -> SearchR
     if _search_engine is None or _embedder is None or _store is None:
         return SearchResponse(results=[], total=0, query_time_ms=0.0)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # FIX: deprecated get_event_loop
     query_embedding = await loop.run_in_executor(None, _embedder.embed_query, q)
     raw_results = await _search_engine.search(q, query_embedding, top_k=limit * 3)
 
@@ -502,7 +502,7 @@ async def sync_browser_bookmarks(
     plugin_cfg = _config.plugin_config.get("browser-bookmarks", {})
     connector.setup(plugin_cfg)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # FIX: deprecated get_event_loop
     docs = await loop.run_in_executor(None, connector.fetch)
 
     if not docs:

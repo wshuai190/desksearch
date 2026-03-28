@@ -95,10 +95,11 @@ async def update_connector_config(name: str, body: dict) -> dict:
     if errors:
         raise HTTPException(status_code=400, detail={"errors": errors})
     conn = reg.get(name)
+    # FIX: use status() instead of accessing private _config attribute
     return {
         "status": "ok",
         "connector": name,
-        "config": conn._config if conn else {},
+        "config": conn.status() if conn else {},
     }
 
 
@@ -110,7 +111,7 @@ async def sync_connector(name: str) -> dict:
     if conn is None:
         raise HTTPException(status_code=404, detail=f"Unknown connector: {name}")
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()  # FIX: deprecated get_event_loop
     docs, errors = await loop.run_in_executor(None, reg.sync, name)
 
     return {

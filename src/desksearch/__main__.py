@@ -143,7 +143,8 @@ def search(query: str, limit: int, file_type: str | None, as_json: bool) -> None
     engine = HybridSearchEngine(config)
 
     from desksearch.api.server import _warm_search_engine
-    _warm_search_engine(engine, store, embedder, config)
+    # FIX: _warm_search_engine takes (engine, store, config), not 4 args
+    _warm_search_engine(engine, store, config)
 
     query_embedding = embedder.embed_query(query)
     raw_results = engine.search_sync(query, query_embedding, top_k=limit * 2)
