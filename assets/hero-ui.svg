@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" width="900" height="520">
+  <defs>
+    <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#818cf8"/>
+      <stop offset="100%" style="stop-color:#6366f1"/>
+    </linearGradient>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="104%">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+    <clipPath id="windowClip">
+      <rect x="0" y="0" width="900" height="520" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <!-- Window frame -->
+  <g filter="url(#shadow)" clip-path="url(#windowClip)">
+    <!-- Title bar -->
+    <rect x="0" y="0" width="900" height="38" fill="#1a1a2e"/>
+    <!-- Traffic lights -->
+    <circle cx="20" cy="19" r="6" fill="#ff5f57"/>
+    <circle cx="40" cy="19" r="6" fill="#febc2e"/>
+    <circle cx="60" cy="19" r="6" fill="#28c840"/>
+    <!-- Tab -->
+    <rect x="80" y="6" width="120" height="26" rx="6" fill="#2a2a40"/>
+    <text x="140" y="23" font-family="system-ui,sans-serif" font-size="11" fill="#a1a1aa" text-anchor="middle">DeskSearch</text>
+    <!-- URL bar -->
+    <rect x="220" y="8" width="460" height="22" rx="6" fill="#0f0f1a"/>
+    <text x="450" y="23" font-family="ui-monospace,monospace" font-size="11" fill="#71717a" text-anchor="middle">127.0.0.1:3777</text>
+
+    <!-- Main content area -->
+    <rect x="0" y="38" width="900" height="452" fill="#0f0f1a"/>
+
+    <!-- Left sidebar -->
+    <rect x="0" y="38" width="170" height="452" fill="#13132a"/>
+    <rect x="0" y="38" width="170" height="452" fill="none" stroke="#2a2a40" stroke-width="1"/>
+    <!-- Sidebar: Folders label -->
+    <text x="16" y="68" font-family="system-ui,sans-serif" font-size="10" fill="#71717a" font-weight="600" letter-spacing="0.5">FOLDERS</text>
+    <!-- Folder items -->
+    <text x="16" y="90" font-family="system-ui,sans-serif" font-size="12" fill="#a1a1aa">📁  ~/Documents</text>
+    <text x="16" y="112" font-family="system-ui,sans-serif" font-size="12" fill="#a1a1aa">📁  ~/Projects</text>
+    <text x="16" y="134" font-family="system-ui,sans-serif" font-size="12" fill="#6366f1">📁  ~/Research</text>
+    <text x="16" y="156" font-family="system-ui,sans-serif" font-size="12" fill="#a1a1aa">📁  ~/Code</text>
+    <!-- Sidebar: Speed tier -->
+    <text x="16" y="196" font-family="system-ui,sans-serif" font-size="10" fill="#71717a" font-weight="600" letter-spacing="0.5">SPEED TIER</text>
+    <!-- Tier buttons -->
+    <rect x="16" y="208" width="60" height="22" rx="4" fill="#6366f1"/>
+    <text x="46" y="223" font-family="system-ui,sans-serif" font-size="10" fill="#f4f4f5" text-anchor="middle" font-weight="600">Regular</text>
+    <rect x="82" y="208" width="44" height="22" rx="4" fill="#2a2a40"/>
+    <text x="104" y="223" font-family="system-ui,sans-serif" font-size="10" fill="#a1a1aa" text-anchor="middle">Tall</text>
+    <rect x="132" y="208" width="30" height="22" rx="4" fill="#2a2a40"/>
+    <text x="147" y="223" font-family="system-ui,sans-serif" font-size="10" fill="#a1a1aa" text-anchor="middle">Venti</text>
+
+    <!-- Main panel -->
+    <!-- Logo + title -->
+    <rect x="365" y="56" width="32" height="32" rx="8" fill="url(#logoGrad)"/>
+    <text x="381" y="80" font-family="system-ui,sans-serif" font-size="18" fill="#fff" text-anchor="middle" font-weight="700">D</text>
+    <text x="408" y="78" font-family="system-ui,sans-serif" font-size="16" fill="#f4f4f5" font-weight="600">DeskSearch</text>
+
+    <!-- Search bar -->
+    <rect x="220" y="100" width="630" height="40" rx="10" fill="#1a1a2e" stroke="#6366f1" stroke-width="2"/>
+    <!-- Magnifying glass icon -->
+    <circle cx="240" cy="120" r="7" fill="none" stroke="#6366f1" stroke-width="2"/>
+    <line x1="245" y1="125" x2="250" y2="130" stroke="#6366f1" stroke-width="2" stroke-linecap="round"/>
+    <!-- Search query text -->
+    <text x="260" y="125" font-family="system-ui,sans-serif" font-size="14" fill="#f4f4f5">machine learning transformers</text>
+
+    <!-- Results area -->
+    <!-- Card 1 -->
+    <rect x="220" y="158" width="630" height="80" rx="8" fill="#1a1a2e" stroke="#2a2a40" stroke-width="1"/>
+    <text x="240" y="182" font-family="system-ui,sans-serif" font-size="16">📄</text>
+    <text x="264" y="183" font-family="ui-monospace,monospace" font-size="13" fill="#f4f4f5" font-weight="500">attention-is-all-you-need.pdf</text>
+    <!-- Score badge -->
+    <rect x="780" y="170" width="52" height="20" rx="4" fill="#6366f1"/>
+    <text x="806" y="184" font-family="ui-monospace,monospace" font-size="11" fill="#f4f4f5" text-anchor="middle" font-weight="600">0.94</text>
+    <text x="264" y="204" font-family="ui-monospace,monospace" font-size="10" fill="#71717a">~/Research/papers/attention-is-all-you-need.pdf</text>
+    <text x="264" y="224" font-family="system-ui,sans-serif" font-size="12" fill="#a1a1aa">We propose a new architecture, the <tspan fill="#818cf8">Transformer</tspan>, based solely on attention mechanisms, dispensing with recurrence...</text>
+
+    <!-- Card 2 -->
+    <rect x="220" y="250" width="630" height="80" rx="8" fill="#1a1a2e" stroke="#2a2a40" stroke-width="1"/>
+    <text x="240" y="274" font-family="system-ui,sans-serif" font-size="16">📝</text>
+    <text x="264" y="275" font-family="ui-monospace,monospace" font-size="13" fill="#f4f4f5" font-weight="500">ml-research-notes.md</text>
+    <rect x="780" y="262" width="52" height="20" rx="4" fill="#4f46e5"/>
+    <text x="806" y="276" font-family="ui-monospace,monospace" font-size="11" fill="#f4f4f5" text-anchor="middle" font-weight="600">0.87</text>
+    <text x="264" y="296" font-family="ui-monospace,monospace" font-size="10" fill="#71717a">~/Research/notes/ml-research-notes.md</text>
+    <text x="264" y="316" font-family="system-ui,sans-serif" font-size="12" fill="#a1a1aa">Self-attention layers in <tspan fill="#818cf8">neural networks</tspan> compute representations by relating different positions of a sequence...</text>
+
+    <!-- Card 3 -->
+    <rect x="220" y="342" width="630" height="80" rx="8" fill="#1a1a2e" stroke="#2a2a40" stroke-width="1"/>
+    <text x="240" y="366" font-family="system-ui,sans-serif" font-size="16">🐍</text>
+    <text x="264" y="367" font-family="ui-monospace,monospace" font-size="13" fill="#f4f4f5" font-weight="500">train_model.py</text>
+    <rect x="780" y="354" width="52" height="20" rx="4" fill="#4338ca"/>
+    <text x="806" y="368" font-family="ui-monospace,monospace" font-size="11" fill="#f4f4f5" text-anchor="middle" font-weight="600">0.82</text>
+    <text x="264" y="388" font-family="ui-monospace,monospace" font-size="10" fill="#71717a">~/Projects/ml-experiments/train_model.py</text>
+    <text x="264" y="408" font-family="system-ui,sans-serif" font-size="12" fill="#a1a1aa">def <tspan fill="#818cf8">training_loop</tspan>(model, dataloader, epochs=100): optimizer = AdamW(model.parameters(), lr=3e-4)...</text>
+
+    <!-- Status bar -->
+    <rect x="0" y="490" width="900" height="30" fill="#1a1a2e"/>
+    <rect x="0" y="490" width="900" height="1" fill="#2a2a40"/>
+    <text x="16" y="510" font-family="ui-monospace,monospace" font-size="11" fill="#71717a">847 results</text>
+    <text x="100" y="510" font-family="ui-monospace,monospace" font-size="11" fill="#71717a">·</text>
+    <text x="114" y="510" font-family="ui-monospace,monospace" font-size="11" fill="#6366f1">0.83ms</text>
+    <text x="164" y="510" font-family="ui-monospace,monospace" font-size="11" fill="#71717a">·</text>
+    <text x="178" y="510" font-family="ui-monospace,monospace" font-size="11" fill="#71717a">Starbucks Regular (4L, 64d)</text>
+    <!-- Right side status -->
+    <circle cx="850" cy="505" r="4" fill="#28c840"/>
+    <text x="860" y="510" font-family="ui-monospace,monospace" font-size="11" fill="#71717a">indexed</text>
+  </g>
+</svg>
