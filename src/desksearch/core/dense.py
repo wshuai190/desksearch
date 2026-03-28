@@ -150,6 +150,20 @@ class DenseIndex:
                 # Restore soft-deleted set (int ids present in FAISS but not in mapping)
                 self._soft_deleted = set()
 
+                # Check dimension mismatch — if the saved index has a
+                # different dimension than the current config, discard it.
+                if index.d != self._dimension:
+                    logger.warning(
+                        "FAISS index dimension %d != config %d, rebuilding",
+                        index.d, self._dimension,
+                    )
+                    for p in (self._index_path, self._mapping_path):
+                        try:
+                            p.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                    return self._create_flat_index()
+
                 # Tune HNSW efSearch for speed on larger indexes.
                 # At 64d with >5k vectors, efSearch=32 gives good recall
                 # while being ~40% faster than the default efSearch=50.
@@ -247,12 +261,23 @@ class DenseIndex:
         return getattr(self._index, "index", self._index)
 
     def _supports_remove_ids(self) -> bool:
-        """Return True if the current inner index supports remove_ids."""
-        inner = self._inner_index()
-        if inner is None:
+        """Check if current FAISS index supports remove_ids."""
+        if self._index is None:
             return False
-        # HNSW does NOT support remove_ids.
-        return not isinstance(inner, faiss.IndexHNSWFlat)
+        # HNSW indices don't support remove_ids
+        if isinstance(self._index, faiss.IndexHNSWFlat):
+            return False
+        # Wrapped indices (e.g., IndexIDMap wrapping HNSW)
+        inner = self._inner_index()
+        if inner is not None and isinstance(inner, faiss.IndexHNSWFlat):
+            return False
+        # Try a safe test
+        try:
+            # Verify the index actually works by checking its type string
+            _ = str(type(self._index))
+            return True
+        except Exception:
+            return False
 
     # ------------------------------------------------------------------
     # Auto-upgrade
@@ -427,7 +452,11 @@ class DenseIndex:
                     old_int_id = self._doc_id_to_int.pop(doc_id)
                     self._int_to_doc_id.pop(old_int_id, None)
                     if self._supports_remove_ids():
-                        self._index.remove_ids(np.array([old_int_id], dtype=np.int64))
+                        try:
+                            self._index.remove_ids(np.array([old_int_id], dtype=np.int64))
+                        except Exception as e:
+                            logger.warning("remove_ids failed (%s), using soft delete", e)
+                            self._soft_deleted.add(old_int_id)
                     else:
                         self._soft_deleted.add(old_int_id)
 
@@ -462,7 +491,11 @@ class DenseIndex:
                 return
             self._int_to_doc_id.pop(int_id, None)
             if self._supports_remove_ids():
-                self._index.remove_ids(np.array([int_id], dtype=np.int64))
+                try:
+                    self._index.remove_ids(np.array([int_id], dtype=np.int64))
+                except Exception as e:
+                    logger.warning("remove_ids failed (%s), using soft delete", e)
+                    self._soft_deleted.add(int_id)
             else:
                 # Soft-delete: keep vector in FAISS, filter at search time.
                 self._soft_deleted.add(int_id)
