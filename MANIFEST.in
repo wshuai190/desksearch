@@ -1,0 +1,14 @@
+include LICENSE
+include README.md
+include CHANGELOG.md
+recursive-include src/desksearch *.py *.html *.css *.js *.json *.svg *.png *.ico
+recursive-exclude rust *
+recursive-exclude src/ui/node_modules *
+recursive-exclude src/ui/dist *
+prune rust
+prune src/ui/node_modules
+prune .venv
+prune electron
+prune benchmarks
+prune docs
+prune scripts
