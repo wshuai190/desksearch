@@ -30,7 +30,11 @@ DeskSearch is a local semantic search engine that understands what you're lookin
 Available as a **Python package** (`pip install desksearch`) and a **standalone Rust binary** (13MB, zero dependencies).
 
 <p align="center">
-  <img src="assets/hero-ui.svg" alt="DeskSearch Interface" width="800" />
+  <img src="assets/screenshot-home.png" alt="DeskSearch Home" width="720" />
+</p>
+
+<p align="center">
+  <img src="assets/screenshot-search-dark.jpg" alt="DeskSearch Search Results" width="720" />
 </p>
 
 ---
