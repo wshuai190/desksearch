@@ -19,6 +19,7 @@ const Settings = lazy(() => import('./components/Settings'));
 const AnalyticsDashboard = lazy(() => import('./components/AnalyticsDashboard'));
 const TopicsPanel = lazy(() => import('./components/TopicsPanel'));
 const DuplicatesPanel = lazy(() => import('./components/DuplicatesPanel'));
+const DataSources = lazy(() => import('./components/DataSources'));
 
 const DEFAULT_FILTERS: SearchFilters = {
   file_types: [],
@@ -34,8 +35,9 @@ const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'folders',   label: 'Folders',    icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z' },
   { id: 'analytics', label: 'Insights',   icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
   { id: 'topics',    label: 'Topics',     icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
-  { id: 'duplicates',label: 'Duplicates', icon: 'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z' },
-  { id: 'settings',  label: 'Settings',   icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
+  { id: 'duplicates',  label: 'Duplicates',    icon: 'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z' },
+  { id: 'datasources', label: 'Data Sources', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4' },
+  { id: 'settings',    label: 'Settings',     icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
 ];
 
 // Skeleton fallback for lazy-loaded tabs
@@ -130,10 +132,10 @@ export default function App() {
   return (
     <div className="min-h-screen flex bg-white dark:bg-dark-bg">
       {/* ── Desktop Sidebar ─────────────────────────────────────── */}
-      <aside className={`hidden sm:flex flex-col border-r border-gray-100 dark:border-dark-border bg-gray-50/50 dark:bg-dark-surface/50 flex-shrink-0 transition-all duration-200 ${sidebarCollapsed ? 'w-16' : 'w-52'}`}>
+      <aside className={`hidden sm:flex flex-col border-r border-gray-100 dark:border-dark-border bg-gray-50/60 dark:bg-dark-surface/60 flex-shrink-0 transition-all duration-300 ease-out ${sidebarCollapsed ? 'w-16' : 'w-52'}`}>
         {/* Logo */}
         <div className="h-14 flex items-center gap-2.5 px-4 border-b border-gray-100 dark:border-dark-border flex-shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-accent-blue flex items-center justify-center flex-shrink-0">
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-accent-blue to-purple-500 flex items-center justify-center flex-shrink-0 shadow-sm">
             <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -229,7 +231,7 @@ export default function App() {
         {/* Mobile header — only on mobile */}
         <header className="sm:hidden flex items-center justify-between px-4 py-3 border-b border-gray-100 dark:border-dark-border bg-white/90 dark:bg-dark-bg/90 backdrop-blur sticky top-0 z-10">
           <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-lg bg-accent-blue flex items-center justify-center">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-accent-blue to-purple-500 flex items-center justify-center shadow-sm">
               <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
@@ -355,6 +357,7 @@ export default function App() {
             {activeTab === 'analytics' && <AnalyticsDashboard />}
             {activeTab === 'topics' && <TopicsPanel />}
             {activeTab === 'duplicates' && <DuplicatesPanel />}
+            {activeTab === 'datasources' && <DataSources />}
             {activeTab === 'settings' && <Settings />}
           </Suspense>
         </main>
@@ -394,7 +397,7 @@ export default function App() {
               el?.classList.toggle('hidden');
             }}
             className={`flex flex-col items-center justify-center gap-0.5 pt-2 pb-1 text-[10px] transition-colors min-h-0 ${
-              ['topics', 'duplicates', 'settings'].includes(activeTab)
+              ['topics', 'duplicates', 'datasources', 'settings'].includes(activeTab)
                 ? 'text-accent-blue'
                 : 'text-gray-400 dark:text-gray-500'
             }`}

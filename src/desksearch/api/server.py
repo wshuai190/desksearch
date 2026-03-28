@@ -13,6 +13,8 @@ from desksearch.api.integrations import (
     set_config as integrations_set_config,
     set_components as integrations_set_components,
 )
+from desksearch.api.connectors import connector_router, set_connector_components
+from desksearch.connectors import ConnectorRegistry
 from desksearch.config import Config
 from desksearch.core.search import HybridSearchEngine
 from desksearch.indexer.embedder import Embedder
@@ -176,10 +178,16 @@ def create_app(
         allow_headers=["*"],
     )
 
+    # Connector registry (v2 connector system)
+    connector_registry = ConnectorRegistry()
+    connector_registry.discover()
+    set_connector_components(connector_registry, pipeline)
+
     # API + WebSocket routes
     app.include_router(router)
     app.include_router(ws_router)
     app.include_router(integrations_router)
+    app.include_router(connector_router)
 
     # Start file watcher on startup, stop on shutdown
     @app.on_event("startup")

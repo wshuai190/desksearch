@@ -4,58 +4,58 @@ import { API_BASE_URL } from '../config';
 import DocumentPreviewPanel from './DocumentPreviewPanel';
 
 // ── File type icon with colored badge ───────────────────────────────────────
-const FILE_TYPE_STYLES: Record<string, { bg: string; text: string }> = {
-  pdf:   { bg: 'bg-red-500',    text: 'PDF' },
-  txt:   { bg: 'bg-gray-500',   text: 'TXT' },
-  md:    { bg: 'bg-gray-600',   text: 'MD' },
-  doc:   { bg: 'bg-blue-600',   text: 'DOC' },
-  docx:  { bg: 'bg-blue-600',   text: 'DOC' },
-  xls:   { bg: 'bg-green-600',  text: 'XLS' },
-  xlsx:  { bg: 'bg-green-600',  text: 'XLS' },
-  csv:   { bg: 'bg-green-500',  text: 'CSV' },
-  py:    { bg: 'bg-sky-600',    text: 'PY' },
-  js:    { bg: 'bg-yellow-500', text: 'JS' },
-  ts:    { bg: 'bg-blue-500',   text: 'TS' },
-  tsx:   { bg: 'bg-blue-400',   text: 'TSX' },
-  jsx:   { bg: 'bg-blue-400',   text: 'JSX' },
-  rs:    { bg: 'bg-orange-600', text: 'RS' },
-  go:    { bg: 'bg-cyan-600',   text: 'GO' },
-  java:  { bg: 'bg-orange-700', text: 'JV' },
-  c:     { bg: 'bg-gray-600',   text: 'C' },
-  cpp:   { bg: 'bg-blue-700',   text: 'C++' },
-  h:     { bg: 'bg-gray-500',   text: 'H' },
-  html:  { bg: 'bg-orange-500', text: 'HTM' },
-  css:   { bg: 'bg-blue-400',   text: 'CSS' },
-  json:  { bg: 'bg-yellow-600', text: 'JSN' },
-  yaml:  { bg: 'bg-pink-500',   text: 'YML' },
-  yml:   { bg: 'bg-pink-500',   text: 'YML' },
-  toml:  { bg: 'bg-gray-600',   text: 'TML' },
-  png:   { bg: 'bg-purple-500', text: 'PNG' },
-  jpg:   { bg: 'bg-purple-500', text: 'JPG' },
-  jpeg:  { bg: 'bg-purple-500', text: 'JPG' },
-  gif:   { bg: 'bg-pink-400',   text: 'GIF' },
-  svg:   { bg: 'bg-green-400',  text: 'SVG' },
-  eml:   { bg: 'bg-indigo-500', text: 'EML' },
-  ipynb: { bg: 'bg-orange-500', text: 'NB' },
-  sh:    { bg: 'bg-gray-600',   text: 'SH' },
-  bash:  { bg: 'bg-gray-600',   text: 'SH' },
-  sql:   { bg: 'bg-teal-500',   text: 'SQL' },
-  r:     { bg: 'bg-blue-600',   text: 'R' },
+const FILE_TYPE_STYLES: Record<string, { bg: string; ring: string; text: string }> = {
+  pdf:   { bg: 'bg-red-500',    ring: 'ring-red-500/20',    text: 'PDF' },
+  txt:   { bg: 'bg-gray-500',   ring: 'ring-gray-500/20',   text: 'TXT' },
+  md:    { bg: 'bg-gray-600',   ring: 'ring-gray-600/20',   text: 'MD' },
+  doc:   { bg: 'bg-blue-600',   ring: 'ring-blue-600/20',   text: 'DOC' },
+  docx:  { bg: 'bg-blue-600',   ring: 'ring-blue-600/20',   text: 'DOC' },
+  xls:   { bg: 'bg-emerald-600', ring: 'ring-emerald-600/20', text: 'XLS' },
+  xlsx:  { bg: 'bg-emerald-600', ring: 'ring-emerald-600/20', text: 'XLS' },
+  csv:   { bg: 'bg-emerald-500', ring: 'ring-emerald-500/20', text: 'CSV' },
+  py:    { bg: 'bg-sky-600',    ring: 'ring-sky-600/20',    text: 'PY' },
+  js:    { bg: 'bg-yellow-500', ring: 'ring-yellow-500/20', text: 'JS' },
+  ts:    { bg: 'bg-blue-500',   ring: 'ring-blue-500/20',   text: 'TS' },
+  tsx:   { bg: 'bg-blue-400',   ring: 'ring-blue-400/20',   text: 'TSX' },
+  jsx:   { bg: 'bg-blue-400',   ring: 'ring-blue-400/20',   text: 'JSX' },
+  rs:    { bg: 'bg-orange-600', ring: 'ring-orange-600/20', text: 'RS' },
+  go:    { bg: 'bg-cyan-600',   ring: 'ring-cyan-600/20',   text: 'GO' },
+  java:  { bg: 'bg-orange-700', ring: 'ring-orange-700/20', text: 'JV' },
+  c:     { bg: 'bg-gray-600',   ring: 'ring-gray-600/20',   text: 'C' },
+  cpp:   { bg: 'bg-blue-700',   ring: 'ring-blue-700/20',   text: 'C++' },
+  h:     { bg: 'bg-gray-500',   ring: 'ring-gray-500/20',   text: 'H' },
+  html:  { bg: 'bg-orange-500', ring: 'ring-orange-500/20', text: 'HTM' },
+  css:   { bg: 'bg-blue-400',   ring: 'ring-blue-400/20',   text: 'CSS' },
+  json:  { bg: 'bg-yellow-600', ring: 'ring-yellow-600/20', text: 'JSN' },
+  yaml:  { bg: 'bg-pink-500',   ring: 'ring-pink-500/20',   text: 'YML' },
+  yml:   { bg: 'bg-pink-500',   ring: 'ring-pink-500/20',   text: 'YML' },
+  toml:  { bg: 'bg-gray-600',   ring: 'ring-gray-600/20',   text: 'TML' },
+  png:   { bg: 'bg-purple-500', ring: 'ring-purple-500/20', text: 'PNG' },
+  jpg:   { bg: 'bg-purple-500', ring: 'ring-purple-500/20', text: 'JPG' },
+  jpeg:  { bg: 'bg-purple-500', ring: 'ring-purple-500/20', text: 'JPG' },
+  gif:   { bg: 'bg-pink-400',   ring: 'ring-pink-400/20',   text: 'GIF' },
+  svg:   { bg: 'bg-green-400',  ring: 'ring-green-400/20',  text: 'SVG' },
+  eml:   { bg: 'bg-indigo-500', ring: 'ring-indigo-500/20', text: 'EML' },
+  ipynb: { bg: 'bg-orange-500', ring: 'ring-orange-500/20', text: 'NB' },
+  sh:    { bg: 'bg-gray-600',   ring: 'ring-gray-600/20',   text: 'SH' },
+  bash:  { bg: 'bg-gray-600',   ring: 'ring-gray-600/20',   text: 'SH' },
+  sql:   { bg: 'bg-teal-500',   ring: 'ring-teal-500/20',   text: 'SQL' },
+  r:     { bg: 'bg-blue-600',   ring: 'ring-blue-600/20',   text: 'R' },
 };
 
 function FileTypeIcon({ type }: { type: string }) {
-  const style = FILE_TYPE_STYLES[type.toLowerCase()] ?? { bg: 'bg-gray-500', text: type.toUpperCase().slice(0, 3) };
+  const style = FILE_TYPE_STYLES[type.toLowerCase()] ?? { bg: 'bg-gray-500', ring: 'ring-gray-500/20', text: type.toUpperCase().slice(0, 3) };
   return (
-    <div className={`w-9 h-9 rounded-lg ${style.bg} flex items-center justify-center flex-shrink-0 shadow-sm`}>
+    <div className={`w-10 h-10 rounded-xl ${style.bg} ring-4 ${style.ring} flex items-center justify-center flex-shrink-0 shadow-sm`}>
       <span className="text-white text-[10px] font-bold tracking-wide leading-none">{style.text}</span>
     </div>
   );
 }
 
-function getScoreLabel(score: number): { label: string; className: string } {
-  if (score >= 0.8) return { label: 'High', className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' };
-  if (score >= 0.5) return { label: 'Good', className: 'bg-blue-500/10 text-blue-500 dark:text-blue-400' };
-  return { label: 'Low', className: 'bg-gray-500/10 text-gray-500 dark:text-gray-400' };
+function getScoreLabel(score: number): { label: string; className: string; icon: string } {
+  if (score >= 0.8) return { label: 'Excellent', className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20', icon: 'M5 13l4 4L19 7' };
+  if (score >= 0.5) return { label: 'Good', className: 'bg-accent-blue/10 text-accent-blue ring-1 ring-accent-blue/20', icon: 'M5 13l4 4L19 7' };
+  return { label: 'Partial', className: 'bg-gray-500/10 text-gray-500 dark:text-gray-400 ring-1 ring-gray-500/20', icon: 'M20 12H4' };
 }
 
 function formatDate(dateStr: string | null): string {
@@ -171,11 +171,11 @@ export default function ResultCard({ result, query, focused = false, onOpen }: R
     <>
       <div
         onClick={handleClick}
-        className={`group p-4 sm:p-5 bg-white dark:bg-dark-surface border rounded-xl
-          cursor-pointer transition-all duration-200
+        className={`result-card group p-4 sm:p-5 bg-white dark:bg-dark-surface border rounded-2xl
+          cursor-pointer
           ${focused
             ? 'border-accent-blue ring-2 ring-accent-blue/20 shadow-md'
-            : 'border-gray-100 dark:border-dark-border hover:border-gray-200 dark:hover:border-dark-border hover:shadow-card-hover'
+            : 'border-gray-100 dark:border-dark-border hover:border-gray-200 dark:hover:border-dark-hover'
           }`}
         tabIndex={0}
         onKeyDown={(e) => { if (e.key === 'Enter') handleClick(); }}
@@ -186,17 +186,17 @@ export default function ResultCard({ result, query, focused = false, onOpen }: R
 
           <div className="flex-1 min-w-0">
             {/* Header row */}
-            <div className="flex items-center gap-2 mb-1 flex-wrap">
+            <div className="flex items-center gap-2.5 mb-1.5 flex-wrap">
               <h3 className="font-semibold text-gray-900 dark:text-gray-100 truncate text-[15px] leading-snug">
                 {result.filename}
               </h3>
-              <span className={`text-[11px] px-1.5 py-0.5 rounded-md font-medium flex-shrink-0 ${scoreClass}`}>
-                {scoreLabel} {Math.round(result.score * 100)}%
+              <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${scoreClass}`}>
+                {scoreLabel} · {Math.round(result.score * 100)}%
               </span>
             </div>
 
             {/* Path */}
-            <p className="text-xs text-gray-400 dark:text-gray-500 truncate mb-2" title={result.path}>
+            <p className="text-xs text-gray-400 dark:text-gray-500 truncate mb-2.5 font-mono" title={result.path}>
               {shortenPath(result.path)}
             </p>
 
@@ -209,7 +209,7 @@ export default function ResultCard({ result, query, focused = false, onOpen }: R
             {/* Footer: metadata badges + actions */}
             <div className="flex items-center gap-2 mt-3">
               {dateStr && (
-                <span className="inline-flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-dark-hover px-2 py-0.5 rounded-md">
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-dark-hover px-2.5 py-1 rounded-lg">
                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
@@ -217,16 +217,19 @@ export default function ResultCard({ result, query, focused = false, onOpen }: R
                 </span>
               )}
               {sizeStr && (
-                <span className="inline-flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-dark-hover px-2 py-0.5 rounded-md">
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-gray-400 dark:text-gray-500 bg-gray-50 dark:bg-dark-hover px-2.5 py-1 rounded-lg">
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7" />
+                  </svg>
                   {sizeStr}
                 </span>
               )}
 
               {/* Actions — visible on hover */}
-              <div className="ml-auto flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <div className="ml-auto flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                 <button
                   onClick={handlePreview}
-                  className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-accent-blue transition-colors px-2 py-1 rounded-md hover:bg-accent-blue/5"
+                  className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-accent-blue transition-colors px-2.5 py-1 rounded-lg hover:bg-accent-blue/5"
                   title="Quick preview"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -236,18 +239,18 @@ export default function ResultCard({ result, query, focused = false, onOpen }: R
                   Preview
                 </button>
 
-                <span className="text-gray-200 dark:text-gray-700">|</span>
+                <div className="w-px h-3.5 bg-gray-200 dark:bg-dark-border" />
 
                 <button
                   onClick={handleCopyPath}
-                  className="text-[11px] text-gray-400 hover:text-accent-blue transition-all flex items-center gap-1 px-2 py-1 rounded-md hover:bg-accent-blue/5"
+                  className="text-[11px] text-gray-400 hover:text-accent-blue transition-all flex items-center gap-1 px-2.5 py-1 rounded-lg hover:bg-accent-blue/5"
                 >
                   {copied ? (
                     <>
-                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
-                      Copied
+                      <span className="text-emerald-500">Copied</span>
                     </>
                   ) : (
                     <>

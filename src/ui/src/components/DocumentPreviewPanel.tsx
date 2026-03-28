@@ -86,15 +86,15 @@ export default function DocumentPreviewPanel({
     <>
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/20 dark:bg-black/50 backdrop-blur-sm z-40 animate-fadeIn"
+        className="fixed inset-0 bg-black/20 dark:bg-black/50 backdrop-blur-md z-40 animate-fadeIn"
         onClick={onClose}
       />
 
       {/* Slide-out panel */}
       <div
         ref={panelRef}
-        className="fixed top-0 right-0 h-full w-full max-w-md bg-white dark:bg-dark-surface shadow-2xl z-50 flex flex-col animate-slideInRight"
-        style={{ animationDuration: '220ms' }}
+        className="fixed top-0 right-0 h-full w-full max-w-md bg-white dark:bg-dark-surface shadow-2xl z-50 flex flex-col animate-slideInRight border-l border-gray-200 dark:border-dark-border"
+        style={{ animationDuration: '250ms' }}
       >
         {/* Header */}
         <div className="flex items-start gap-3 px-5 pt-5 pb-4 border-b border-gray-100 dark:border-dark-border">

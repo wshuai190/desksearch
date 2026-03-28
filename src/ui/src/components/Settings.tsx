@@ -2,12 +2,107 @@ import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
 import type { SettingsData } from '../types';
 
+// ── Section header ────────────────────────────────────────────────────────────
+function SectionHeader({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
+  return (
+    <div className="flex items-start gap-3 px-6 pt-6 pb-4">
+      <div className="w-9 h-9 rounded-xl bg-accent-blue/10 dark:bg-accent-blue/15 flex items-center justify-center flex-shrink-0">
+        {icon}
+      </div>
+      <div>
+        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{description}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Setting row ───────────────────────────────────────────────────────────────
+function SettingRow({ label, description, children, last = false }: {
+  label: string;
+  description?: string;
+  children: React.ReactNode;
+  last?: boolean;
+}) {
+  return (
+    <div className={`flex items-center justify-between gap-4 px-6 py-4 ${last ? '' : 'border-b border-gray-100 dark:border-dark-border'}`}>
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-gray-700 dark:text-gray-200">{label}</div>
+        {description && <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{description}</div>}
+      </div>
+      <div className="flex-shrink-0">{children}</div>
+    </div>
+  );
+}
+
+// ── Speed tier selector ───────────────────────────────────────────────────────
+const SPEED_TIERS = [
+  {
+    id: 'fast',
+    name: 'Fast',
+    description: 'Smaller chunks, quicker indexing',
+    icon: '⚡',
+    chunkSize: 256,
+    chunkOverlap: 32,
+  },
+  {
+    id: 'balanced',
+    name: 'Balanced',
+    description: 'Best for most use cases',
+    icon: '⚖️',
+    chunkSize: 512,
+    chunkOverlap: 64,
+    recommended: true,
+  },
+  {
+    id: 'thorough',
+    name: 'Thorough',
+    description: 'Larger chunks, better context',
+    icon: '🔬',
+    chunkSize: 1024,
+    chunkOverlap: 128,
+  },
+];
+
+function SpeedTierSelector({ chunkSize, onChange }: {
+  chunkSize: number;
+  onChange: (chunkSize: number, chunkOverlap: number) => void;
+}) {
+  const currentTier = SPEED_TIERS.find(t => t.chunkSize === chunkSize)?.id || 'custom';
+
+  return (
+    <div className="grid grid-cols-3 gap-3 px-6 pb-5">
+      {SPEED_TIERS.map((tier) => {
+        const isSelected = currentTier === tier.id;
+        return (
+          <button
+            key={tier.id}
+            onClick={() => onChange(tier.chunkSize, tier.chunkOverlap)}
+            className={`speed-tier text-left ${isSelected ? 'selected' : ''}`}
+          >
+            {tier.recommended && (
+              <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] px-2 py-0.5 bg-accent-blue text-white rounded-full font-medium">
+                Recommended
+              </span>
+            )}
+            <div className="text-xl mb-2">{tier.icon}</div>
+            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{tier.name}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{tier.description}</div>
+            <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 font-mono">
+              {tier.chunkSize} chars · {tier.chunkOverlap} overlap
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── QR Code for mobile access ─────────────────────────────────────────────────
 function MobileAccessCard({ settings }: { settings: SettingsData }) {
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Determine the LAN URL
   const { hostname, protocol } = window.location;
   const isLocal = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
   const port = settings.port;
@@ -15,82 +110,84 @@ function MobileAccessCard({ settings }: { settings: SettingsData }) {
     ? null
     : `${protocol}//${hostname}${port && port !== 80 && port !== 443 ? `:${port}` : ''}`;
 
-  // Generate QR code from a free API (requires desktop internet, not phone)
   useEffect(() => {
     if (!lanUrl) return;
     const encodedUrl = encodeURIComponent(lanUrl);
-    setQrUrl(`https://api.qrserver.com/v1/create-qr-code/?size=160x160&format=png&color=3b82f6&bgcolor=ffffff&data=${encodedUrl}`);
+    setQrUrl(`https://api.qrserver.com/v1/create-qr-code/?size=160x160&format=png&color=6366f1&bgcolor=ffffff&data=${encodedUrl}`);
   }, [lanUrl]);
 
   const serverAddress = `${settings.host === '0.0.0.0' ? 'your-computer-ip' : settings.host}:${settings.port}`;
 
   return (
-    <div className="bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-xl">📱</span>
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Use on Your Phone</h3>
-      </div>
+    <div className="settings-section">
+      <SectionHeader
+        icon={
+          <svg className="w-4 h-4 text-accent-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+          </svg>
+        }
+        title="Mobile Access"
+        description="Search your files from your phone"
+      />
 
-      {lanUrl ? (
-        <div className="flex flex-col sm:flex-row items-center gap-5">
-          {/* QR Code */}
-          <div className="flex-shrink-0">
-            {qrUrl ? (
-              <img
-                src={qrUrl}
-                alt="QR code to open DeskSearch on your phone"
-                className="w-36 h-36 rounded-xl border border-gray-200 dark:border-dark-border"
-                onError={() => setQrUrl(null)}
-              />
-            ) : (
-              <canvas ref={canvasRef} className="w-36 h-36 rounded-xl bg-gray-100 dark:bg-dark-hover" />
-            )}
-          </div>
-          <div className="space-y-2 text-center sm:text-left">
-            <p className="text-sm text-gray-700 dark:text-gray-300 font-medium">
-              Scan with your phone's camera
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Your phone needs to be on the same Wi-Fi network.
-            </p>
-            <div className="inline-flex items-center gap-2 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg">
-              <span className="text-xs font-mono text-gray-700 dark:text-gray-200 break-all">{lanUrl}</span>
-              <button
-                onClick={() => navigator.clipboard.writeText(lanUrl)}
-                className="tap-sm text-gray-400 hover:text-accent-blue transition-colors flex-shrink-0"
-                title="Copy URL"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-              </button>
+      <div className="px-6 pb-6">
+        {lanUrl ? (
+          <div className="flex flex-col sm:flex-row items-center gap-5">
+            <div className="flex-shrink-0">
+              {qrUrl ? (
+                <img
+                  src={qrUrl}
+                  alt="QR code to open DeskSearch on your phone"
+                  className="w-32 h-32 rounded-xl border border-gray-200 dark:border-dark-border"
+                  onError={() => setQrUrl(null)}
+                />
+              ) : (
+                <canvas ref={canvasRef} className="w-32 h-32 rounded-xl bg-gray-100 dark:bg-dark-hover" />
+              )}
+            </div>
+            <div className="space-y-2 text-center sm:text-left">
+              <p className="text-sm text-gray-700 dark:text-gray-300 font-medium">
+                Scan with your phone's camera
+              </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Your phone needs to be on the same Wi-Fi network.
+              </p>
+              <div className="inline-flex items-center gap-2 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg">
+                <span className="text-xs font-mono text-gray-700 dark:text-gray-200 break-all">{lanUrl}</span>
+                <button
+                  onClick={() => navigator.clipboard.writeText(lanUrl)}
+                  className="text-gray-400 hover:text-accent-blue transition-colors flex-shrink-0"
+                  title="Copy URL"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <p className="text-sm text-gray-600 dark:text-gray-400">
-            You're accessing DeskSearch from <strong>localhost</strong>. To use it on your phone:
-          </p>
-          <ol className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
-            <li className="flex items-start gap-2">
-              <span className="w-5 h-5 rounded-full bg-accent-blue/10 text-accent-blue text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">1</span>
-              <span>Make sure your phone is on the <strong>same Wi-Fi</strong> as this computer</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="w-5 h-5 rounded-full bg-accent-blue/10 text-accent-blue text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">2</span>
-              <span>Find your computer's local IP address (usually starts with 192.168…)</span>
-            </li>
-            <li className="flex items-start gap-2">
-              <span className="w-5 h-5 rounded-full bg-accent-blue/10 text-accent-blue text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">3</span>
-              <span>Open your phone's browser and go to: <code className="bg-gray-100 dark:bg-dark-hover px-1.5 py-0.5 rounded font-mono text-xs">{serverAddress}</code></span>
-            </li>
-          </ol>
-          <p className="text-xs text-gray-400 dark:text-gray-500 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-lg px-3 py-2">
-            💡 If DeskSearch was started with <code className="font-mono">host: 0.0.0.0</code>, it's already accessible on your local network.
-          </p>
-        </div>
-      )}
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              You're accessing DeskSearch from <strong>localhost</strong>. To use on your phone:
+            </p>
+            <ol className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
+              <li className="flex items-start gap-2">
+                <span className="w-5 h-5 rounded-full bg-accent-blue/10 text-accent-blue text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">1</span>
+                <span>Make sure your phone is on the <strong>same Wi-Fi</strong></span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="w-5 h-5 rounded-full bg-accent-blue/10 text-accent-blue text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">2</span>
+                <span>Find your computer's IP (usually 192.168…)</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="w-5 h-5 rounded-full bg-accent-blue/10 text-accent-blue text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">3</span>
+                <span>Open: <code className="bg-gray-100 dark:bg-dark-hover px-1.5 py-0.5 rounded font-mono text-xs">{serverAddress}</code></span>
+              </li>
+            </ol>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -115,11 +212,10 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Editable fields
-  const [chunkSize, setChunkSize] = useState('');
-  const [chunkOverlap, setChunkOverlap] = useState('');
+  const [chunkSize, setChunkSize] = useState(512);
+  const [chunkOverlap, setChunkOverlap] = useState(64);
   const [maxFileSize, setMaxFileSize] = useState('');
   const [excludedDirs, setExcludedDirs] = useState('');
   const [fileExtensions, setFileExtensions] = useState<string[]>([]);
@@ -133,12 +229,11 @@ export default function Settings() {
         if (res.ok && active) {
           const data: SettingsData = await res.json();
           setSettings(data);
-          setChunkSize(String(data.chunk_size));
-          setChunkOverlap(String(data.chunk_overlap));
+          setChunkSize(data.chunk_size);
+          setChunkOverlap(data.chunk_overlap);
           setMaxFileSize(String(data.max_file_size_mb));
           setExcludedDirs(data.excluded_dirs.join(', '));
           setFileExtensions(data.file_extensions);
-          // Custom extensions: those not in COMMON_TYPES
           const commonExts = COMMON_TYPES.map(t => t.ext);
           const custom = data.file_extensions.filter(e => !commonExts.includes(e));
           setCustomExtensions(custom.join(', '));
@@ -164,7 +259,6 @@ export default function Settings() {
     setMessage(null);
     try {
       const allExtensions = [...fileExtensions];
-      // Add any custom extensions
       if (customExtensions.trim()) {
         const customs = customExtensions.split(',').map(s => {
           const t = s.trim();
@@ -175,18 +269,14 @@ export default function Settings() {
 
       const body: Record<string, unknown> = {
         file_extensions: allExtensions,
+        chunk_size: chunkSize,
+        chunk_overlap: chunkOverlap,
       };
 
-      if (showAdvanced) {
-        const cs = parseInt(chunkSize);
-        if (!isNaN(cs)) body.chunk_size = cs;
-        const co = parseInt(chunkOverlap);
-        if (!isNaN(co)) body.chunk_overlap = co;
-        const mfs = parseInt(maxFileSize);
-        if (!isNaN(mfs)) body.max_file_size_mb = mfs;
-        if (excludedDirs.trim()) {
-          body.excluded_dirs = excludedDirs.split(',').map(s => s.trim()).filter(Boolean);
-        }
+      const mfs = parseInt(maxFileSize);
+      if (!isNaN(mfs)) body.max_file_size_mb = mfs;
+      if (excludedDirs.trim()) {
+        body.excluded_dirs = excludedDirs.split(',').map(s => s.trim()).filter(Boolean);
       }
 
       const res = await fetch(`${API_BASE_URL}/api/settings`, {
@@ -199,6 +289,7 @@ export default function Settings() {
         const data = await res.json();
         setSettings(data);
         setMessage({ type: 'success', text: 'Settings saved! Re-index your folders for changes to take effect.' });
+        setTimeout(() => setMessage(null), 5000);
       } else {
         const err = await res.json();
         setMessage({ type: 'error', text: err.detail || 'Couldn\'t save — please try again.' });
@@ -212,10 +303,11 @@ export default function Settings() {
 
   if (loading) {
     return (
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
-        <div className="h-7 bg-gray-200 dark:bg-dark-border rounded-lg w-36 animate-pulse" />
+      <div className="max-w-2xl mx-auto px-4 py-8 space-y-5 page-enter">
+        <div className="h-8 skeleton rounded-xl w-36" />
+        <div className="h-4 skeleton rounded-lg w-64" />
         {[1, 2, 3].map(i => (
-          <div key={i} className="h-32 bg-gray-200 dark:bg-dark-border rounded-xl animate-pulse" />
+          <div key={i} className="h-40 skeleton rounded-2xl" />
         ))}
       </div>
     );
@@ -224,8 +316,8 @@ export default function Settings() {
   if (!settings) {
     return (
       <div className="flex flex-col items-center justify-center py-20 gap-3 px-4">
-        <div className="w-12 h-12 rounded-full bg-red-50 dark:bg-red-900/20 flex items-center justify-center">
-          <svg className="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <div className="w-14 h-14 rounded-2xl bg-red-50 dark:bg-red-900/20 flex items-center justify-center">
+          <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
           </svg>
         </div>
@@ -237,42 +329,89 @@ export default function Settings() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-5 pb-10">
+    <div className="max-w-2xl mx-auto px-4 py-8 space-y-6 pb-12 page-enter">
+      {/* Page header */}
       <div>
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white">Settings</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">Settings</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Control what DeskSearch indexes and how it works.
+          Configure how DeskSearch indexes and searches your files.
         </p>
       </div>
 
       {/* Status message */}
       {message && (
-        <div className={`text-sm px-4 py-3 rounded-xl flex items-start gap-2 ${
+        <div className={`text-sm px-4 py-3 rounded-2xl flex items-start gap-2.5 animate-fadeIn ${
           message.type === 'success'
-            ? 'bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800/40'
+            ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/40'
             : 'bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800/40'
         }`}>
-          <span>{message.type === 'success' ? '✅' : '⚠️'}</span>
+          <span className="flex-shrink-0 mt-0.5">{message.type === 'success' ? '✅' : '⚠️'}</span>
           <span>{message.text}</span>
         </div>
       )}
 
-      {/* What to index */}
-      <div className="bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl p-5">
-        <div className="mb-4">
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">What types of files to search</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Check the file types you want DeskSearch to include. Changes take effect when you refresh a folder.
-          </p>
-        </div>
+      {/* ── Section: General ─────────────────────────────────────── */}
+      <div className="settings-section">
+        <SectionHeader
+          icon={
+            <svg className="w-4 h-4 text-accent-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          }
+          title="General"
+          description="Basic configuration for your DeskSearch instance"
+        />
+        <SettingRow label="Embedding Model" description="The AI model used to understand your files">
+          <span className="text-sm font-mono text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg">
+            {settings.embedding_model}
+          </span>
+        </SettingRow>
+        <SettingRow label="Storage Location" description="Where DeskSearch keeps its index">
+          <span className="text-xs font-mono text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg max-w-[200px] truncate block" title={settings.data_dir}>
+            {settings.data_dir}
+          </span>
+        </SettingRow>
+        <SettingRow label="Server Address" description="Network address DeskSearch listens on" last>
+          <span className="text-sm font-mono text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg">
+            {settings.host}:{settings.port}
+          </span>
+        </SettingRow>
+      </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {/* ── Section: Indexing ────────────────────────────────────── */}
+      <div className="settings-section">
+        <SectionHeader
+          icon={
+            <svg className="w-4 h-4 text-accent-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+            </svg>
+          }
+          title="Indexing"
+          description="Control what and how DeskSearch processes your files"
+        />
+
+        {/* Speed tier selector */}
+        <div className="px-6 pb-2">
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Indexing Strategy</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500 mb-3">Choose how DeskSearch splits your files for searching</div>
+        </div>
+        <SpeedTierSelector
+          chunkSize={chunkSize}
+          onChange={(cs, co) => { setChunkSize(cs); setChunkOverlap(co); }}
+        />
+
+        {/* File types */}
+        <div className="px-6 pb-2 border-t border-gray-100 dark:border-dark-border pt-5">
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">File Types</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500 mb-3">Select which file types to include in the index</div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 px-6 pb-4">
           {COMMON_TYPES.map(({ ext, label, icon }) => {
             const checked = fileExtensions.includes(ext);
             return (
               <label
                 key={ext}
-                className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${
+                className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all duration-150 ${
                   checked
                     ? 'border-accent-blue/40 bg-accent-blue/5 dark:bg-accent-blue/10'
                     : 'border-gray-200 dark:border-dark-border hover:border-gray-300 dark:hover:border-gray-600 hover:bg-gray-50 dark:hover:bg-dark-hover'
@@ -295,158 +434,85 @@ export default function Settings() {
         </div>
 
         {/* Custom types */}
-        <div className="mt-4">
+        <div className="px-6 pb-5">
           <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-            Other file types (optional)
+            Additional file types
           </label>
           <input
             type="text"
             value={customExtensions}
             onChange={(e) => setCustomExtensions(e.target.value)}
             placeholder="e.g. .rs, .toml, .r"
-            className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue/50 font-mono"
+            className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue/50 font-mono"
           />
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Separate with commas</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Separate with commas</p>
         </div>
       </div>
 
-      {/* Mobile access */}
+      {/* ── Section: Search ──────────────────────────────────────── */}
+      <div className="settings-section">
+        <SectionHeader
+          icon={
+            <svg className="w-4 h-4 text-accent-blue" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          }
+          title="Search"
+          description="Fine-tune search behavior and file limits"
+        />
+        <SettingRow label="Max File Size" description="Files larger than this are skipped during indexing">
+          <div className="relative">
+            <input
+              type="text"
+              value={maxFileSize}
+              onChange={(e) => setMaxFileSize(e.target.value)}
+              className="w-24 px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent-blue/50 text-right pr-9"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">MB</span>
+          </div>
+        </SettingRow>
+        <SettingRow label="Excluded Folders" description="Folder names to skip (e.g. .git, node_modules)" last>
+          <input
+            type="text"
+            value={excludedDirs}
+            onChange={(e) => setExcludedDirs(e.target.value)}
+            placeholder=".git, node_modules"
+            className="w-56 px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue/50 font-mono text-xs"
+          />
+        </SettingRow>
+      </div>
+
+      {/* ── Section: Integrations ────────────────────────────────── */}
       <MobileAccessCard settings={settings} />
 
-      {/* About */}
-      <div className="bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">About this installation</h3>
-        <div className="space-y-2.5">
-          <InfoRow
-            label="Model"
-            value={settings.embedding_model}
-            hint="The AI model used to understand your files"
-          />
-          <InfoRow
-            label="Storage"
-            value={settings.data_dir}
-            hint="Where DeskSearch keeps its index data"
-          />
-          <InfoRow
-            label="Server"
-            value={`${settings.host}:${settings.port}`}
-            hint="The address DeskSearch listens on"
-          />
-        </div>
-      </div>
-
-      {/* Advanced */}
-      <div>
-        <button
-          onClick={() => setShowAdvanced(!showAdvanced)}
-          className="tap-sm flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-        >
-          <svg className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-          </svg>
-          {showAdvanced ? 'Hide advanced settings' : 'Advanced settings'}
-        </button>
-
-        {showAdvanced && (
-          <div className="mt-3 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl p-5 space-y-4 animate-slideDown">
-            <p className="text-xs text-gray-500 dark:text-gray-400 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-lg px-3 py-2">
-              ⚠️ These settings affect how DeskSearch processes files. Changing them requires re-indexing your folders to take effect.
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <AdvancedInput
-                label="Chunk size"
-                value={chunkSize}
-                onChange={setChunkSize}
-                hint="Characters per section (64–4096)"
-              />
-              <AdvancedInput
-                label="Chunk overlap"
-                value={chunkOverlap}
-                onChange={setChunkOverlap}
-                hint="Section overlap (0–512)"
-              />
-              <AdvancedInput
-                label="Max file size"
-                value={maxFileSize}
-                onChange={setMaxFileSize}
-                hint="Skip files larger than this (MB)"
-                suffix="MB"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                Folders to skip
-              </label>
-              <textarea
-                value={excludedDirs}
-                onChange={(e) => setExcludedDirs(e.target.value)}
-                rows={2}
-                className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent-blue/50 font-mono resize-none"
-                placeholder=".git, node_modules, .venv"
-              />
-              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Folder names to ignore during indexing, separated by commas</p>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Save button */}
-      <div className="flex items-center justify-between pt-2">
+      {/* ── Save button ──────────────────────────────────────────── */}
+      <div className="flex items-center justify-between pt-2 pb-4">
         <p className="text-xs text-gray-400 dark:text-gray-500">
-          Settings are saved locally and apply immediately.
+          Changes require re-indexing to take effect.
         </p>
         <button
           onClick={save}
           disabled={saving}
-          className="tap-sm flex items-center gap-2 px-5 py-2.5 text-sm rounded-xl bg-accent-blue text-white hover:bg-accent-blue-hover disabled:opacity-50 transition-colors font-medium"
+          className="flex items-center gap-2 px-6 py-2.5 text-sm rounded-xl bg-accent-blue text-white hover:bg-accent-blue-hover disabled:opacity-50 transition-all duration-200 font-medium shadow-sm hover:shadow-md"
         >
           {saving ? (
-            <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Saving…</>
+            <>
+              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              Saving…
+            </>
           ) : (
-            <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/></svg> Save Settings</>
+            <>
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
+              </svg>
+              Save Settings
+            </>
           )}
         </button>
       </div>
-    </div>
-  );
-}
-
-function InfoRow({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 py-2 border-b border-gray-100 dark:border-dark-border last:border-0">
-      <div>
-        <div className="text-sm text-gray-600 dark:text-gray-300">{label}</div>
-        {hint && <div className="text-xs text-gray-400 dark:text-gray-500">{hint}</div>}
-      </div>
-      <span className="text-gray-700 dark:text-gray-200 font-mono text-xs bg-gray-100 dark:bg-dark-hover px-2 py-1 rounded-lg break-all">{value}</span>
-    </div>
-  );
-}
-
-function AdvancedInput({ label, value, onChange, hint, suffix }: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  hint?: string;
-  suffix?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">{label}</label>
-      <div className="relative">
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className={`w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent-blue/50 ${suffix ? 'pr-10' : ''}`}
-        />
-        {suffix && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">{suffix}</span>
-        )}
-      </div>
-      {hint && <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{hint}</p>}
     </div>
   );
 }

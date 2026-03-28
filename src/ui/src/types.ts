@@ -119,7 +119,25 @@ export interface WebhookTestResult {
   delivered: boolean;
 }
 
-export type TabId = 'search' | 'dashboard' | 'files' | 'folders' | 'settings' | 'analytics' | 'topics' | 'duplicates';
+export interface ConnectorInfo {
+  name: string;
+  description: string;
+  version: string;
+  author: string;
+  enabled: boolean;
+  configured: boolean;
+  config: Record<string, unknown>;
+}
+
+export interface ConnectorSyncResult {
+  status: string;
+  connector: string;
+  documents_found: number;
+  documents_indexed: number;
+  errors: number;
+}
+
+export type TabId = 'search' | 'dashboard' | 'files' | 'folders' | 'settings' | 'analytics' | 'topics' | 'duplicates' | 'datasources';
 
 // --- Killer feature types ---
 

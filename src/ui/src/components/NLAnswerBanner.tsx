@@ -19,7 +19,7 @@ export default function NLAnswerBanner({ answer }: NLAnswerBannerProps) {
   };
 
   return (
-    <div className="mb-5 rounded-xl border border-accent-blue/15 bg-gradient-to-br from-blue-50/80 to-indigo-50/40 dark:from-blue-950/20 dark:to-indigo-950/10 dark:border-accent-blue/20 overflow-hidden animate-fadeIn">
+    <div className="mb-5 rounded-2xl border border-accent-blue/15 bg-gradient-to-br from-indigo-50/80 to-purple-50/40 dark:from-indigo-950/20 dark:to-purple-950/10 dark:border-accent-blue/20 overflow-hidden animate-fadeIn accent-glow">
       {/* Header */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2">
         <div className="flex items-center gap-2.5">

@@ -30,9 +30,17 @@ STATE_INDEXING = "indexing"
 STATE_FAILED = "failed"
 
 
-def compute_file_hash(path: Path, buf_size: int = 65536) -> str:
-    """Compute SHA-256 hex digest of a file's contents."""
-    h = hashlib.sha256()
+def compute_file_hash(path: Path, buf_size: int = 131072) -> str:
+    """Compute a fast hash of a file's contents.
+
+    Uses xxhash (XXH3-128) when available (~10x faster than SHA-256),
+    falling back to SHA-256 if xxhash is not installed.
+    """
+    try:
+        import xxhash
+        h = xxhash.xxh3_128()
+    except ImportError:
+        h = hashlib.sha256()
     with open(path, "rb") as f:
         while True:
             data = f.read(buf_size)

@@ -51,17 +51,14 @@ async fn search_handler(
 ) -> Json<SearchResponse> {
     let start = std::time::Instant::now();
 
-    // Embed query if embed_client is available
-    let query_embedding = if let Some(ref embed_client) = state.embed_client {
-        match embed_client.lock() {
-            Ok(mut client) => match client.embed_query(&req.query) {
-                Ok(embedding) => Some(embedding),
-                Err(e) => {
-                    warn!("Query embedding failed: {e}, falling back to BM25-only");
-                    None
-                }
-            },
-            Err(_) => None,
+    // Embed query if embedding backend is available
+    let query_embedding = if let Some(ref backend) = state.embed_backend {
+        match backend.embed_query(&req.query) {
+            Ok(embedding) => Some(embedding),
+            Err(e) => {
+                warn!("Query embedding failed: {e}, falling back to BM25-only");
+                None
+            }
         }
     } else {
         None

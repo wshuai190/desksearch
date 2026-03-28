@@ -67,6 +67,24 @@ _ONNX_MODEL_REPO = "sentence-transformers/all-MiniLM-L6-v2"
 _ONNX_MODEL_FILE = "onnx/model.onnx"
 _ONNX_DIMENSION = 384
 
+# Local Starbucks ONNX model directory
+_STARBUCKS_ONNX_DIR = Path.home() / ".desksearch" / "models"
+
+# Mapping from tier name to ONNX filename (prefer INT8 for speed)
+_STARBUCKS_ONNX_FILES = {
+    "fast": "starbucks-fast-int8.onnx",
+    "regular": "starbucks-regular-int8.onnx",
+    "pro": "starbucks-pro-int8.onnx",
+}
+
+# Optimal ONNX batch sizes per tier (profiled on Apple M-series)
+# regular-INT8: smaller batches are faster; fast-INT8: larger batches win
+_STARBUCKS_ONNX_BATCH = {
+    "fast": 128,
+    "regular": 32,
+    "pro": 32,
+}
+
 
 def _onnx_available() -> bool:
     try:
@@ -162,8 +180,17 @@ class Embedder:
 
             t0 = time.perf_counter()
 
-            # Try Starbucks first (preferred)
-            if self.model_name == DEFAULT_EMBEDDING_MODEL and _transformers_available():
+            # Try Starbucks ONNX first (fastest — 6x over PyTorch)
+            if self.model_name == DEFAULT_EMBEDDING_MODEL and _onnx_available():
+                try:
+                    self._load_starbucks_onnx()
+                except Exception as e:
+                    logger.warning("Failed to load Starbucks ONNX model: %s", e)
+                    self._onnx_session = None
+                    self._tokenizer = None
+
+            # Fallback: Starbucks via PyTorch (slower but always works)
+            if not self.is_loaded and self.model_name == DEFAULT_EMBEDDING_MODEL and _transformers_available():
                 try:
                     self._load_starbucks()
                 except Exception as e:
@@ -191,6 +218,69 @@ class Embedder:
                 elapsed, self._backend, self._target_layers, self._dimension,
             )
             self._touch()
+
+    def _load_starbucks_onnx(self) -> None:
+        """Load Starbucks model via pre-exported ONNX (INT8) for maximum speed.
+
+        These models were exported with CLS pooling and dimension truncation
+        baked in, so the output is already the right shape.  INT8 quantisation
+        gives ~6x speedup over PyTorch float32 on Apple M-series CPUs.
+        """
+        import onnxruntime as ort
+        from tokenizers import Tokenizer
+
+        # Determine which ONNX file to use based on the Starbucks tier
+        from desksearch.config import Config
+        tier = "regular"  # default
+        for tier_name, (layers, dim) in STARBUCKS_TIERS.items():
+            if layers == self._target_layers and dim == self._target_dim:
+                tier = tier_name
+                break
+
+        onnx_file = _STARBUCKS_ONNX_FILES.get(tier)
+        if onnx_file is None:
+            raise FileNotFoundError(f"No ONNX file mapping for tier '{tier}'")
+
+        onnx_path = _STARBUCKS_ONNX_DIR / onnx_file
+        tokenizer_path = _STARBUCKS_ONNX_DIR / "tokenizer.json"
+
+        if not onnx_path.exists():
+            raise FileNotFoundError(f"ONNX model not found: {onnx_path}")
+        if not tokenizer_path.exists():
+            raise FileNotFoundError(f"Tokenizer not found: {tokenizer_path}")
+
+        logger.info(
+            "Loading Starbucks ONNX model: %s (tier=%s, %d layers, %dd)",
+            onnx_file, tier, self._target_layers, self._target_dim,
+        )
+
+        import os
+        import platform
+        ncpus = os.cpu_count() or 4
+        is_apple = platform.system() == "Darwin" and platform.machine() in ("arm64", "aarch64")
+        intra = min(4, ncpus) if is_apple else min(ncpus // 2, 8)
+
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        sess_options.intra_op_num_threads = intra
+        sess_options.inter_op_num_threads = 1
+        sess_options.enable_mem_pattern = False
+
+        self._onnx_session = ort.InferenceSession(
+            str(onnx_path), sess_options=sess_options,
+            providers=["CPUExecutionProvider"],
+        )
+        self._tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        self._tokenizer.enable_padding(pad_id=0, pad_token="[PAD]")
+        self._tokenizer.enable_truncation(max_length=256)
+
+        self._dimension = self._target_dim
+        self._backend = "starbucks_onnx"
+        self._onnx_optimal_batch = _STARBUCKS_ONNX_BATCH.get(tier, 32)
+        logger.info(
+            "Starbucks ONNX ready: %s, dim=%d, optimal_batch=%d",
+            onnx_file, self._dimension, self._onnx_optimal_batch,
+        )
 
     # Max layers we ever need — pre-cut the model to this on first download
     _MAX_LAYERS = 6
@@ -379,6 +469,33 @@ class Embedder:
         self._ensure_loaded()
         return self._dimension
 
+    def _embed_starbucks_onnx(self, texts: list[str], batch_size: int) -> np.ndarray:
+        """Embed using Starbucks ONNX model — CLS token from last_hidden_state."""
+        # Use profiled optimal batch size unless caller overrides with something smaller
+        bs = min(batch_size, getattr(self, '_onnx_optimal_batch', batch_size))
+
+        all_embeddings = []
+        for i in range(0, len(texts), bs):
+            batch = texts[i : i + bs]
+            encoded = self._tokenizer.encode_batch(batch)
+
+            input_ids = np.array([e.ids for e in encoded], dtype=np.int64)
+            attention_mask = np.array([e.attention_mask for e in encoded], dtype=np.int64)
+
+            outputs = self._onnx_session.run(None, {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+            })
+
+            # CLS token is at position 0 of last_hidden_state
+            cls_embeddings = outputs[0][:, 0, :]
+
+            # L2 normalize
+            norms = np.clip(np.linalg.norm(cls_embeddings, axis=1, keepdims=True), 1e-9, None)
+            all_embeddings.append((cls_embeddings / norms).astype(np.float32))
+
+        return np.vstack(all_embeddings)
+
     def _embed_starbucks(self, texts: list[str], batch_size: int) -> np.ndarray:
         """Embed using Starbucks model — CLS token, truncated dimensions."""
         import torch
@@ -449,7 +566,9 @@ class Embedder:
 
         self._ensure_loaded()
 
-        if self._backend == "starbucks":
+        if self._backend == "starbucks_onnx":
+            return self._embed_starbucks_onnx(texts, batch_size)
+        elif self._backend == "starbucks":
             return self._embed_starbucks(texts, batch_size)
         elif self._backend == "onnx":
             return self._embed_onnx(texts, batch_size)

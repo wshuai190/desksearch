@@ -205,43 +205,18 @@ fn index_directory(path: &PathBuf, data_dir: &PathBuf, config: &DeskSearchConfig
     let index_dir = data_dir.join("index");
     let db_path = data_dir.join("metadata.db");
 
-    // Try to set up embedding
+    // Try to set up embedding — ONNX first, then Python fallback
     let project_root = detect_project_root();
-    let python_path = project_root.join(".venv/bin/python3");
-    let script_path = project_root.join("scripts/embed_server.py");
     let vector_path = data_dir.join("vectors.usearch");
 
-    let mut embed_client = if python_path.exists() && script_path.exists() {
-        match desksearch_core::EmbedClient::new(
-            python_path.to_str().unwrap_or("python3"),
-            script_path.to_str().unwrap_or(""),
-            config.embedding_dim,
-            config.embedding_layers,
-        ) {
-            Ok(mut client) => {
-                if client.ping().is_ok() {
-                    info!("EmbedClient ready for CLI indexing");
-                    Some(client)
-                } else {
-                    warn!("EmbedClient ping failed, BM25-only");
-                    None
-                }
-            }
-            Err(e) => {
-                warn!("Failed to create EmbedClient: {e}, BM25-only");
-                None
-            }
-        }
-    } else {
-        None
-    };
+    let mut embed_backend = cli_embed_backend(config, &project_root);
 
-    let engine = if embed_client.is_some() {
+    let engine = if embed_backend.is_some() {
         match desksearch_core::VectorIndex::open_or_create(&vector_path, config.embedding_dim) {
             Ok(vi) => SearchEngine::new_hybrid(&index_dir, SearchConfig::default(), vi)?,
             Err(e) => {
                 warn!("Failed to create VectorIndex: {e}, BM25-only");
-                embed_client = None;
+                embed_backend = None;
                 SearchEngine::new(&index_dir, SearchConfig::default())?
             }
         }
@@ -327,7 +302,7 @@ fn index_directory(path: &PathBuf, data_dir: &PathBuf, config: &DeskSearchConfig
             let chunk_id = store.insert_chunk(doc_id, chunk.index as i64, &chunk.text, chunk.offset as i64)?;
             engine.bm25().add_chunk(&mut writer, chunk_id as u64, &chunk.text, &path_str)?;
 
-            if embed_client.is_some() {
+            if embed_backend.is_some() {
                 pending_embed_texts.push(chunk.text.clone());
                 pending_embed_ids.push(chunk_id as u64);
             }
@@ -335,8 +310,8 @@ fn index_directory(path: &PathBuf, data_dir: &PathBuf, config: &DeskSearchConfig
 
         // Flush embedding batch
         if pending_embed_texts.len() >= 32 {
-            if let Some(ref mut client) = embed_client {
-                if let Ok(embeddings) = client.embed(&pending_embed_texts) {
+            if let Some(ref backend) = embed_backend {
+                if let Ok(embeddings) = backend.embed(&pending_embed_texts) {
                     for (cid, emb) in pending_embed_ids.iter().zip(embeddings.iter()) {
                         let _ = engine.add_vector(*cid, emb);
                     }
@@ -351,8 +326,8 @@ fn index_directory(path: &PathBuf, data_dir: &PathBuf, config: &DeskSearchConfig
 
     // Flush remaining embeddings
     if !pending_embed_texts.is_empty() {
-        if let Some(ref mut client) = embed_client {
-            if let Ok(embeddings) = client.embed(&pending_embed_texts) {
+        if let Some(ref backend) = embed_backend {
+            if let Ok(embeddings) = backend.embed(&pending_embed_texts) {
                 for (cid, emb) in pending_embed_ids.iter().zip(embeddings.iter()) {
                     let _ = engine.add_vector(*cid, emb);
                 }
@@ -401,27 +376,16 @@ fn cli_search(query: &str, top_k: usize, data_dir: &PathBuf, config: &DeskSearch
     }
 
     let project_root = detect_project_root();
-    let python_path = project_root.join(".venv/bin/python3");
-    let script_path = project_root.join("scripts/embed_server.py");
     let vector_path = data_dir.join("vectors.usearch");
 
-    // Try to create embed client for dense search
-    let mut embed_client = if python_path.exists() && script_path.exists() {
-        desksearch_core::EmbedClient::new(
-            python_path.to_str().unwrap_or("python3"),
-            script_path.to_str().unwrap_or(""),
-            config.embedding_dim,
-            config.embedding_layers,
-        ).ok()
-    } else {
-        None
-    };
+    // Try ONNX first, then Python fallback
+    let mut embed_backend = cli_embed_backend(config, &project_root);
 
-    let engine = if embed_client.is_some() && vector_path.exists() {
+    let engine = if embed_backend.is_some() && vector_path.exists() {
         match desksearch_core::VectorIndex::open_or_create(&vector_path, config.embedding_dim) {
             Ok(vi) => SearchEngine::new_hybrid(&index_dir, SearchConfig::default(), vi)?,
             Err(_) => {
-                embed_client = None;
+                embed_backend = None;
                 SearchEngine::new(&index_dir, SearchConfig::default())?
             }
         }
@@ -430,9 +394,9 @@ fn cli_search(query: &str, top_k: usize, data_dir: &PathBuf, config: &DeskSearch
     };
 
     // Embed query if possible
-    let query_embedding = embed_client
-        .as_mut()
-        .and_then(|c| c.embed_query(query).ok());
+    let query_embedding = embed_backend
+        .as_ref()
+        .and_then(|b| b.embed_query(query).ok());
 
     let search_query = SearchQuery {
         text: query.to_string(),
@@ -581,3 +545,59 @@ fn cli_benchmark(path: Option<PathBuf>, data_dir: &PathBuf, _config: &DeskSearch
 }
 
 use desksearch_core::SearchEngine;
+
+/// Create an embedding backend for CLI commands (non-server).
+/// Tries ONNX first, falls back to Python subprocess.
+fn cli_embed_backend(
+    config: &DeskSearchConfig,
+    project_root: &std::path::Path,
+) -> Option<state::EmbedBackend> {
+    // Try ONNX first
+    if let Some(home) = dirs_next::home_dir() {
+        let models_dir = home.join(".desksearch").join("models");
+        let variant = match config.search_speed.as_str() {
+            "fast" => "fast",
+            "precise" => "pro",
+            _ => "regular",
+        };
+        let model_path = models_dir.join(format!("starbucks-{variant}.onnx"));
+        let tokenizer_path = models_dir.join("tokenizer.json");
+
+        if model_path.exists() && tokenizer_path.exists() {
+            match desksearch_core::OnnxEmbedder::new(&model_path, &tokenizer_path, config.embedding_dim) {
+                Ok(embedder) => {
+                    info!(backend = "onnx", variant, "CLI embedding ready");
+                    return Some(state::EmbedBackend::Onnx(std::sync::Arc::new(embedder)));
+                }
+                Err(e) => {
+                    warn!("Failed to load ONNX model: {e}, trying Python");
+                }
+            }
+        }
+    }
+
+    // Fall back to Python
+    let python_path = project_root.join(".venv/bin/python3");
+    let script_path = project_root.join("scripts/embed_server.py");
+    if python_path.exists() && script_path.exists() {
+        match desksearch_core::EmbedClient::new(
+            python_path.to_str().unwrap_or("python3"),
+            script_path.to_str().unwrap_or(""),
+            config.embedding_dim,
+            config.embedding_layers,
+        ) {
+            Ok(mut client) => {
+                if client.ping().is_ok() {
+                    info!(backend = "python", "CLI embedding ready");
+                    return Some(state::EmbedBackend::Python(std::sync::Mutex::new(client)));
+                }
+                warn!("EmbedClient ping failed, BM25-only");
+            }
+            Err(e) => {
+                warn!("Failed to create EmbedClient: {e}, BM25-only");
+            }
+        }
+    }
+
+    None
+}

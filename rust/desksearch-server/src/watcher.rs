@@ -208,19 +208,17 @@ fn reindex_files(state: &AppState, paths: &[PathBuf]) {
             }
         }
 
-        // Embed chunks if embed_client is available
-        if let Some(ref embed_client) = state.embed_client {
+        // Embed chunks if embedding backend is available
+        if let Some(ref backend) = state.embed_backend {
             let texts: Vec<String> = chunks.iter().map(|c| c.text.clone()).collect();
-            if let Ok(mut client) = embed_client.lock() {
-                match client.embed(&texts) {
-                    Ok(embeddings) => {
-                        let engine = state.search.read().unwrap();
-                        for (chunk_id, embedding) in chunk_ids.iter().zip(embeddings.iter()) {
-                            let _ = engine.add_vector(*chunk_id, embedding);
-                        }
+            match backend.embed(&texts) {
+                Ok(embeddings) => {
+                    let engine = state.search.read().unwrap();
+                    for (chunk_id, embedding) in chunk_ids.iter().zip(embeddings.iter()) {
+                        let _ = engine.add_vector(*chunk_id, embedding);
                     }
-                    Err(e) => warn!("Embedding failed during watcher reindex: {e}"),
                 }
+                Err(e) => warn!("Embedding failed during watcher reindex: {e}"),
             }
         }
 

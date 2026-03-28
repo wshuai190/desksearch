@@ -137,8 +137,8 @@ async fn index_handler(
                 .add_chunk(&mut bm25_writer, chunk_id as u64, &chunk.text, &path_str)
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("BM25 add failed: {e}")))?;
 
-            // Queue for embedding if embed_client is available
-            if state.embed_client.is_some() {
+            // Queue for embedding if embedding backend is available
+            if state.embed_backend.is_some() {
                 pending_embed_texts.push(chunk.text.clone());
                 pending_embed_ids.push(chunk_id as u64);
             }
@@ -189,20 +189,18 @@ fn flush_embeddings(
     texts: &mut Vec<String>,
     ids: &mut Vec<u64>,
 ) {
-    if let Some(ref embed_client) = state.embed_client {
-        if let Ok(mut client) = embed_client.lock() {
-            match client.embed(texts) {
-                Ok(embeddings) => {
-                    let engine = state.search.read().unwrap();
-                    for (chunk_id, embedding) in ids.iter().zip(embeddings.iter()) {
-                        if let Err(e) = engine.add_vector(*chunk_id, embedding) {
-                            warn!("Failed to add vector for chunk {chunk_id}: {e}");
-                        }
+    if let Some(ref backend) = state.embed_backend {
+        match backend.embed(texts) {
+            Ok(embeddings) => {
+                let engine = state.search.read().unwrap();
+                for (chunk_id, embedding) in ids.iter().zip(embeddings.iter()) {
+                    if let Err(e) = engine.add_vector(*chunk_id, embedding) {
+                        warn!("Failed to add vector for chunk {chunk_id}: {e}");
                     }
                 }
-                Err(e) => {
-                    warn!("Batch embedding failed: {e}");
-                }
+            }
+            Err(e) => {
+                warn!("Batch embedding failed: {e}");
             }
         }
     }

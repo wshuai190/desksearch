@@ -12,7 +12,7 @@
 
   /* Typography hierarchy */
   h1, h2, h3, h4 {
-    letter-spacing: -0.02em;
+    letter-spacing: -0.025em;
   }
 
   ::-webkit-scrollbar {
@@ -24,7 +24,7 @@
   }
 
   .dark ::-webkit-scrollbar-thumb {
-    background: #333;
+    background: #2a2a40;
     border-radius: 3px;
   }
 
@@ -38,13 +38,25 @@
   }
 
   .dark ::-webkit-scrollbar-thumb:hover {
-    background: #555;
+    background: #3a3a55;
   }
 
   /* Safe-area insets for notched iPhones */
   :root {
     --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
     --safe-area-inset-top: env(safe-area-inset-top, 0px);
+    --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
+    --accent-glow: rgba(99, 102, 241, 0.15);
+  }
+
+  /* Selection color */
+  ::selection {
+    background: rgba(99, 102, 241, 0.2);
+    color: inherit;
+  }
+
+  .dark ::selection {
+    background: rgba(99, 102, 241, 0.35);
   }
 }
 
@@ -63,38 +75,141 @@
     padding-bottom: calc(4.5rem + var(--safe-area-inset-bottom));
   }
 
-  /* Skeleton shimmer effect */
+  /* Skeleton shimmer effect — premium feel */
   .skeleton {
     @apply relative overflow-hidden;
-    background: linear-gradient(90deg, #e5e7eb 25%, #f3f4f6 50%, #e5e7eb 75%);
+    background: linear-gradient(90deg, #f0f0f5 25%, #fafafe 50%, #f0f0f5 75%);
     background-size: 200% 100%;
-    animation: shimmer 1.5s ease-in-out infinite;
+    animation: shimmer 1.8s ease-in-out infinite;
   }
 
   .dark .skeleton {
-    background: linear-gradient(90deg, #27272a 25%, #3f3f46 50%, #27272a 75%);
+    background: linear-gradient(90deg, #1a1a2e 25%, #252540 50%, #1a1a2e 75%);
     background-size: 200% 100%;
   }
 
   /* Search input enhanced focus */
   .search-input {
-    @apply transition-shadow duration-300;
+    @apply transition-all duration-300;
   }
 
   .search-input:not(:focus) {
-    box-shadow: 0 2px 8px -2px rgba(0,0,0,0.08), 0 1px 2px -1px rgba(0,0,0,0.04);
+    box-shadow: 0 2px 12px -2px rgba(0,0,0,0.06), 0 1px 3px -1px rgba(0,0,0,0.04);
   }
 
   .search-input:focus {
-    box-shadow: 0 0 0 1px rgba(59,130,246,0.3), 0 4px 16px -4px rgba(59,130,246,0.12), 0 2px 8px -2px rgba(0,0,0,0.06);
+    box-shadow: 0 0 0 1px rgba(99,102,241,0.4), 0 4px 20px -4px rgba(99,102,241,0.15), 0 2px 8px -2px rgba(0,0,0,0.06);
   }
 
   .dark .search-input:not(:focus) {
-    box-shadow: 0 2px 8px -2px rgba(0,0,0,0.3), 0 1px 2px -1px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 12px -2px rgba(0,0,0,0.4), 0 1px 3px -1px rgba(0,0,0,0.3);
   }
 
   .dark .search-input:focus {
-    box-shadow: 0 0 0 1px rgba(59,130,246,0.4), 0 4px 20px -4px rgba(59,130,246,0.2);
+    box-shadow: 0 0 0 1px rgba(99,102,241,0.5), 0 4px 24px -4px rgba(99,102,241,0.25);
+  }
+
+  /* Premium result card hover */
+  .result-card {
+    @apply transition-all duration-250;
+    transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .result-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px -4px rgba(0,0,0,0.08), 0 2px 6px -1px rgba(0,0,0,0.04);
+  }
+
+  .dark .result-card:hover {
+    box-shadow: 0 8px 24px -4px rgba(0,0,0,0.4), 0 2px 6px -1px rgba(0,0,0,0.3);
+  }
+
+  /* Gradient text utility */
+  .gradient-text {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Glass morphism panels */
+  .glass {
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+  }
+
+  .glass-light {
+    background: rgba(255, 255, 255, 0.85);
+  }
+
+  .dark .glass-light {
+    background: rgba(15, 15, 26, 0.85);
+  }
+
+  /* Settings section card */
+  .settings-section {
+    @apply bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-2xl overflow-hidden;
+    transition: box-shadow 0.2s ease;
+  }
+
+  .settings-section:hover {
+    box-shadow: 0 4px 12px -2px rgba(0,0,0,0.04);
+  }
+
+  .dark .settings-section:hover {
+    box-shadow: 0 4px 12px -2px rgba(0,0,0,0.2);
+  }
+
+  /* Toggle switch */
+  .toggle-switch {
+    @apply relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 cursor-pointer;
+  }
+
+  .toggle-switch[data-checked="true"] {
+    @apply bg-accent-blue;
+  }
+
+  .toggle-switch[data-checked="false"] {
+    @apply bg-gray-200 dark:bg-dark-border;
+  }
+
+  .toggle-switch .toggle-dot {
+    @apply inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform duration-200;
+  }
+
+  .toggle-switch[data-checked="true"] .toggle-dot {
+    @apply translate-x-6;
+  }
+
+  .toggle-switch[data-checked="false"] .toggle-dot {
+    @apply translate-x-1;
+  }
+
+  /* Speed tier card */
+  .speed-tier {
+    @apply relative border-2 rounded-xl p-4 cursor-pointer transition-all duration-200;
+  }
+
+  .speed-tier.selected {
+    @apply border-accent-blue bg-accent-blue/5 dark:bg-accent-blue/10;
+  }
+
+  .speed-tier:not(.selected) {
+    @apply border-gray-200 dark:border-dark-border hover:border-gray-300 dark:hover:border-gray-600;
+  }
+
+  /* Page transition wrapper */
+  .page-enter {
+    animation: fadeIn 0.25s ease-out forwards;
+  }
+
+  /* Accent border glow */
+  .accent-glow {
+    box-shadow: 0 0 0 1px rgba(99,102,241,0.15), 0 0 20px -5px rgba(99,102,241,0.1);
+  }
+
+  .dark .accent-glow {
+    box-shadow: 0 0 0 1px rgba(99,102,241,0.25), 0 0 30px -5px rgba(99,102,241,0.15);
   }
 }
 
@@ -128,3 +243,24 @@ html {
 .nav-item.active::before {
   @apply h-4;
 }
+
+/* Custom duration not in TW by default */
+.duration-250 {
+  transition-duration: 250ms;
+}
+
+/* Stagger animation delays for children */
+.stagger-children > * {
+  opacity: 0;
+  animation: fadeIn 0.25s ease-out forwards;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 40ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 80ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 120ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 160ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 200ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 280ms; }
+.stagger-children > *:nth-child(9) { animation-delay: 320ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 360ms; }

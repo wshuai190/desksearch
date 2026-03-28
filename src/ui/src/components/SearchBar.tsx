@@ -115,15 +115,15 @@ function CenteredHero({ fileCount, isIndexing, onExampleClick }: CenteredHeroPro
   return (
     <div className="text-center mb-8 sm:mb-10 px-2">
       {/* Logo icon */}
-      <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-accent-blue to-blue-600 shadow-lg shadow-accent-blue/20 mb-5">
-        <svg className="w-7 h-7 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+      <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-accent-blue via-purple-500 to-violet-500 shadow-lg shadow-accent-blue/25 dark:shadow-accent-blue/15 mb-6 animate-float">
+        <svg className="w-8 h-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
         </svg>
       </div>
 
       {/* Title */}
-      <h1 className="text-3xl sm:text-4xl font-bold mb-2 text-gray-900 dark:text-gray-50 tracking-tight">
-        DeskSearch
+      <h1 className="text-3xl sm:text-4xl font-bold mb-2 tracking-tight">
+        <span className="text-gray-900 dark:text-gray-50">Desk</span><span className="gradient-text">Search</span>
       </h1>
 
       {/* Subtitle — context-aware */}
@@ -166,7 +166,7 @@ function CenteredHero({ fileCount, isIndexing, onExampleClick }: CenteredHeroPro
               <button
                 key={q}
                 onClick={() => onExampleClick(q)}
-                className="text-sm px-3.5 py-1.5 rounded-full border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-300 hover:border-accent-blue hover:text-accent-blue dark:hover:text-accent-blue hover:bg-accent-blue/5 transition-all duration-200"
+                className="text-sm px-4 py-2 rounded-xl border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-300 hover:border-accent-blue/50 hover:text-accent-blue dark:hover:text-accent-blue hover:bg-accent-blue/5 transition-all duration-200 hover:shadow-sm"
               >
                 {q}
               </button>
@@ -352,10 +352,10 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             onFocus={handleFocus}
             onBlur={handleBlur}
             placeholder={isListening ? 'Listening...' : 'Search your files...'}
-            className={`search-input w-full bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border
+            className={`search-input w-full bg-white dark:bg-dark-surface border border-gray-200/80 dark:border-dark-border
               rounded-2xl pl-12 text-gray-900 dark:text-gray-100
               placeholder-gray-400 dark:placeholder-gray-500
-              focus:outline-none focus:border-accent-blue/50
+              focus:outline-none focus:border-accent-blue/40
               ${centered ? 'py-4 text-lg' : 'py-3 text-base'}
               ${hasSpeechRecognition ? 'pr-20' : 'pr-10'}`}
           />

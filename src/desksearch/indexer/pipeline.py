@@ -48,8 +48,10 @@ PARSE_LOOKAHEAD = 16
 PARSE_TIMEOUT_SEC = 30
 
 # Inner ONNX batch size: how many sequences per session.run() call.
-# 128 uses ~150 MB peak on all-MiniLM-L6-v2 — safe for 8 GB Mac mini.
-ONNX_INNER_BATCH = 128
+# For Starbucks ONNX INT8 (regular tier): 32 is optimal on Apple M-series.
+# For fast tier: 128 is optimal. The embedder auto-selects via _onnx_optimal_batch.
+# This is the upper cap; the embedder may use a smaller batch internally.
+ONNX_INNER_BATCH = 64
 
 
 class StatusType(Enum):
