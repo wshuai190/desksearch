@@ -15,14 +15,41 @@ from desksearch.api.integrations import (
     set_components as integrations_set_components,
 )
 from desksearch.api.connectors import connector_router, set_connector_components
-from desksearch.connectors import ConnectorRegistry
 from desksearch.config import Config
-from desksearch.core.search import HybridSearchEngine
-from desksearch.indexer.embedder import Embedder
-from desksearch.indexer.pipeline import IndexingPipeline
-from desksearch.indexer.store import MetadataStore
-from desksearch.indexer.watcher import FileWatcher
 from desksearch.utils.memory import log_memory, log_memory_delta
+
+# Lazy imports for heavy modules — defer loading of torch/transformers/faiss/onnxruntime
+# until actually needed (when create_app instantiates components).
+
+
+def _get_connector_registry():
+    from desksearch.connectors import ConnectorRegistry
+    return ConnectorRegistry()
+
+
+def _get_search_engine(config, dimension):
+    from desksearch.core.search import HybridSearchEngine
+    return HybridSearchEngine(config, dimension=dimension)
+
+
+def _get_embedder(model_name, embedding_dim, embedding_layers):
+    from desksearch.indexer.embedder import Embedder
+    return Embedder(model_name, embedding_dim=embedding_dim, embedding_layers=embedding_layers)
+
+
+def _get_pipeline(config, search_engine, embedder, store):
+    from desksearch.indexer.pipeline import IndexingPipeline
+    return IndexingPipeline(config, search_engine=search_engine, embedder=embedder, store=store)
+
+
+def _get_store(db_path):
+    from desksearch.indexer.store import MetadataStore
+    return MetadataStore(db_path)
+
+
+def _get_file_watcher(config, on_created, on_modified, on_deleted):
+    from desksearch.indexer.watcher import FileWatcher
+    return FileWatcher(config, on_created=on_created, on_modified=on_modified, on_deleted=on_deleted)
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +65,10 @@ UI_DIST_DIR = _pkg_ui if _pkg_ui.exists() else _src_ui
 def create_app(
     config: Config | None = None,
     *,
-    store: MetadataStore | None = None,
-    embedder: Embedder | None = None,
-    engine: HybridSearchEngine | None = None,
-    pipeline: IndexingPipeline | None = None,
+    store=None,
+    embedder=None,
+    engine=None,
+    pipeline=None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -65,19 +92,21 @@ def create_app(
     # Track whether components were pre-built (daemon mode) or created here
     is_standalone = embedder is None
 
-    # Initialize core components — single instances shared across the app
-    store = store or MetadataStore(config.data_dir / "metadata.db")
+    # Initialize core components — single instances shared across the app.
+    # Heavy modules (torch, transformers, faiss, onnxruntime) are imported
+    # lazily inside factory functions to speed up module import time.
+    store = store or _get_store(config.data_dir / "metadata.db")
     # Resolve Starbucks tier (updates config.embedding_dim and embedding_layers)
     config.resolve_starbucks_tier()
-    embedder = embedder or Embedder(
+    embedder = embedder or _get_embedder(
         config.embedding_model,
         embedding_dim=config.embedding_dim,
         embedding_layers=config.embedding_layers,
     )
-    engine = engine or HybridSearchEngine(
+    engine = engine or _get_search_engine(
         config, dimension=config.embedding_dim,
     )
-    pipeline = pipeline or IndexingPipeline(
+    pipeline = pipeline or _get_pipeline(
         config, search_engine=engine, embedder=embedder, store=store,
     )
 
@@ -128,7 +157,7 @@ def create_app(
         except Exception:
             logger.exception("Watcher: failed to remove %s", path)
 
-    watcher = FileWatcher(
+    watcher = _get_file_watcher(
         config,
         on_created=_on_file_created,
         on_modified=_on_file_modified,
@@ -168,16 +197,14 @@ def create_app(
     # Import trigger_index for auto-index in lifespan
     from desksearch.api.routes import trigger_index
 
-    # Use ORJSONResponse for ~5x faster JSON serialization.  orjson is already
-    # a dependency; this makes it the default for all JSON responses.
-    from fastapi.responses import ORJSONResponse
-
+    # Note: ORJSONResponse is deprecated in newer FastAPI — it now serializes
+    # data directly to JSON bytes via Pydantic when a return type or response
+    # model is set, which is already fast. No custom response class needed.
     app = FastAPI(
         title="DeskSearch",
         description="Private semantic search engine for your local files",
         version="0.1.0",
         lifespan=lifespan,
-        default_response_class=ORJSONResponse,
     )
 
     # --- Request timing middleware ---
@@ -218,7 +245,7 @@ def create_app(
     )
 
     # Connector registry (v2 connector system)
-    connector_registry = ConnectorRegistry()
+    connector_registry = _get_connector_registry()
     connector_registry.discover()
     set_connector_components(connector_registry, pipeline)
 
