@@ -161,7 +161,7 @@ All commands support `--json` for scripting and automation.
 DeskSearch uses the [Starbucks](https://huggingface.co/ielabgroup/Starbucks-msmarco) 2D Matryoshka embedding model, which enables flexible layer × dimension truncation for speed/quality trade-offs.
 
 **Paper:** [Starbucks: Improved Training for 2D Matryoshka Embeddings](https://arxiv.org/abs/2410.13230)
-*Shuai Wang, Shengyao Zhuang, Bevan Koopman, Guido Zuccon* — ECIR 2026
+*Shengyao Zhuang\*, Shuai Wang\*, Fabio Zheng, Bevan Koopman, Guido Zuccon* — ECIR 2026 (\*equal contribution)
 
 > Unlike traditional embeddings that require fixed dimensions, Starbucks lets you choose both the number of transformer layers AND the embedding dimension at inference time — no retraining needed. DeskSearch leverages this to offer three speed tiers from a single model.
 
@@ -170,7 +170,7 @@ If you use DeskSearch or the Starbucks model in your research, please cite:
 ```bibtex
 @inproceedings{wang2026starbucks,
   title={Starbucks: Improved Training for 2D Matryoshka Embeddings},
-  author={Wang, Shuai and Zhuang, Shengyao and Koopman, Bevan and Zuccon, Guido},
+  author={Zhuang, Shengyao and Wang, Shuai and Zheng, Fabio and Koopman, Bevan and Zuccon, Guido},
   booktitle={ECIR},
   year={2026}
 }
