@@ -52,6 +52,10 @@ Available as a **Python package** (`pip install desksearch`) and a **standalone 
 
 ## Quick Start
 
+<p align="center">
+  <img src="assets/demo-install.svg" alt="Quick Start" width="800" />
+</p>
+
 ### Python
 
 ```bash
@@ -70,6 +74,26 @@ chmod +x desksearch
 ```
 
 On first run, DeskSearch walks you through an onboarding wizard to pick folders and a speed tier. After that, one command is all you need.
+
+---
+
+## Search
+
+<p align="center">
+  <img src="assets/demo-search.svg" alt="Search in Action" width="800" />
+</p>
+
+## Indexing
+
+<p align="center">
+  <img src="assets/demo-index.svg" alt="Indexing Progress" width="800" />
+</p>
+
+## Performance
+
+<p align="center">
+  <img src="assets/demo-benchmark.svg" alt="Benchmark" width="800" />
+</p>
 
 ---
 

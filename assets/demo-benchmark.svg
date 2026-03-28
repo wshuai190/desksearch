@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="370">
+  <defs>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Window frame -->
+  <rect x="10" y="10" width="780" height="350" rx="10" ry="10" fill="#0f0f1a" filter="url(#shadow)"/>
+
+  <!-- Title bar -->
+  <rect x="10" y="10" width="780" height="36" rx="10" ry="10" fill="#1a1a2e"/>
+  <rect x="10" y="36" width="780" height="10" fill="#1a1a2e"/>
+
+  <!-- Traffic lights -->
+  <circle cx="34" cy="28" r="6" fill="#ff5f56"/>
+  <circle cx="54" cy="28" r="6" fill="#ffbd2e"/>
+  <circle cx="74" cy="28" r="6" fill="#27c93f"/>
+
+  <!-- Title -->
+  <text x="400" y="33" text-anchor="middle" font-family="Menlo, Monaco, Consolas, monospace" font-size="13" fill="#888">Terminal — DeskSearch</text>
+
+  <style>
+    .prompt { fill: #27c93f; }
+    .cmd { fill: #f0f0f0; }
+    .dim { fill: #888888; }
+    .cyan { fill: #56d4dd; }
+    .yellow { fill: #e5c07b; }
+    .green { fill: #98c379; }
+    .label { fill: #888888; }
+    .value { fill: #e5c07b; }
+    .sep { fill: #c678dd; }
+    text { font-family: Menlo, Monaco, Consolas, monospace; font-size: 14px; }
+  </style>
+
+  <!-- Command -->
+  <text x="30" y="72">
+    <tspan class="prompt">$ </tspan><tspan class="cmd">desksearch benchmark</tspan>
+  </text>
+
+  <!-- Title -->
+  <text x="30" y="100" class="cmd">🏋️ DeskSearch Benchmark</text>
+
+  <!-- Top separator -->
+  <text x="30" y="124" class="sep">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</text>
+
+  <!-- Metrics -->
+  <text x="30" y="150"><tspan class="label">Indexing:    </tspan><tspan class="value">171 files/sec</tspan><tspan class="dim"> (ONNX INT8)</tspan></text>
+
+  <text x="30" y="174"><tspan class="label">Search p50:  </tspan><tspan class="value">0.83 ms</tspan></text>
+
+  <text x="30" y="198"><tspan class="label">Search p95:  </tspan><tspan class="value">1.2 ms</tspan></text>
+
+  <text x="30" y="222"><tspan class="label">Search p99:  </tspan><tspan class="value">2.1 ms</tspan></text>
+
+  <text x="30" y="246"><tspan class="label">Throughput:  </tspan><tspan class="value">1,193 queries/sec</tspan></text>
+
+  <text x="30" y="270"><tspan class="label">Memory:      </tspan><tspan class="value">142 MB peak</tspan></text>
+
+  <text x="30" y="294"><tspan class="label">Startup:     </tspan><tspan class="value">1.3 sec</tspan></text>
+
+  <!-- Bottom separator -->
+  <text x="30" y="318" class="sep">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</text>
+</svg>

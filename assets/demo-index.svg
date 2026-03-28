@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="370">
+  <defs>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Window frame -->
+  <rect x="10" y="10" width="780" height="350" rx="10" ry="10" fill="#0f0f1a" filter="url(#shadow)"/>
+
+  <!-- Title bar -->
+  <rect x="10" y="10" width="780" height="36" rx="10" ry="10" fill="#1a1a2e"/>
+  <rect x="10" y="36" width="780" height="10" fill="#1a1a2e"/>
+
+  <!-- Traffic lights -->
+  <circle cx="34" cy="28" r="6" fill="#ff5f56"/>
+  <circle cx="54" cy="28" r="6" fill="#ffbd2e"/>
+  <circle cx="74" cy="28" r="6" fill="#27c93f"/>
+
+  <!-- Title -->
+  <text x="400" y="33" text-anchor="middle" font-family="Menlo, Monaco, Consolas, monospace" font-size="13" fill="#888">Terminal — DeskSearch</text>
+
+  <style>
+    .prompt { fill: #27c93f; }
+    .cmd { fill: #f0f0f0; }
+    .dim { fill: #888888; }
+    .cyan { fill: #56d4dd; }
+    .yellow { fill: #e5c07b; }
+    .green { fill: #98c379; }
+    .bold { fill: #f0f0f0; font-weight: bold; }
+    text { font-family: Menlo, Monaco, Consolas, monospace; font-size: 14px; }
+  </style>
+
+  <!-- Command -->
+  <text x="30" y="72">
+    <tspan class="prompt">$ </tspan><tspan class="cmd">desksearch index ~/Documents ~/Projects</tspan>
+  </text>
+
+  <!-- Discovering -->
+  <text x="30" y="100" class="cmd">🔍 Discovering files...</text>
+  <text x="30" y="124" class="cmd">📄 Found <tspan class="yellow">12,847</tspan> files across 2 folders</text>
+
+  <!-- Progress bar -->
+  <text x="30" y="160" class="cmd">⚡ Indexing: <tspan class="green">████████████████</tspan><tspan class="dim">░░░░</tspan> <tspan class="yellow">64%</tspan> (8,222/12,847)</text>
+
+  <!-- Current file -->
+  <text x="30" y="184" class="dim">   Current: research/neural-retrieval-2025.pdf</text>
+
+  <!-- Speed -->
+  <text x="30" y="208">
+    <tspan class="dim">   Speed: </tspan><tspan class="yellow">171 files/sec</tspan><tspan class="dim"> | Elapsed: 48s</tspan>
+  </text>
+
+  <!-- Complete -->
+  <text x="30" y="248" class="green">✅ Complete: 12,847 files indexed in 75s</text>
+
+  <!-- Index sizes -->
+  <text x="30" y="272">
+    <tspan class="dim">   BM25 index: </tspan><tspan class="yellow">42MB</tspan>
+    <tspan class="dim"> | Dense index: </tspan><tspan class="yellow">18MB</tspan>
+    <tspan class="dim"> | Total: </tspan><tspan class="yellow">60MB</tspan>
+  </text>
+
+  <!-- Blinking cursor -->
+  <rect x="30" y="298" width="9" height="18" fill="#27c93f" opacity="0.8">
+    <animate attributeName="opacity" values="0.8;0;0.8" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
+</svg>

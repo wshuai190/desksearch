@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="310">
+  <defs>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Window frame -->
+  <rect x="10" y="10" width="780" height="290" rx="10" ry="10" fill="#0f0f1a" filter="url(#shadow)"/>
+
+  <!-- Title bar -->
+  <rect x="10" y="10" width="780" height="36" rx="10" ry="10" fill="#1a1a2e"/>
+  <rect x="10" y="36" width="780" height="10" fill="#1a1a2e"/>
+
+  <!-- Traffic lights -->
+  <circle cx="34" cy="28" r="6" fill="#ff5f56"/>
+  <circle cx="54" cy="28" r="6" fill="#ffbd2e"/>
+  <circle cx="74" cy="28" r="6" fill="#27c93f"/>
+
+  <!-- Title -->
+  <text x="400" y="33" text-anchor="middle" font-family="Menlo, Monaco, Consolas, monospace" font-size="13" fill="#888">Terminal — DeskSearch</text>
+
+  <style>
+    .prompt { fill: #27c93f; }
+    .cmd { fill: #f0f0f0; }
+    .dim { fill: #888888; }
+    .cyan { fill: #56d4dd; }
+    .yellow { fill: #e5c07b; }
+    .green { fill: #98c379; }
+    .emoji { fill: #f0f0f0; }
+    text { font-family: Menlo, Monaco, Consolas, monospace; font-size: 14px; }
+  </style>
+
+  <!-- Line 1: pip install -->
+  <text x="30" y="72">
+    <tspan class="prompt">$ </tspan><tspan class="cmd">pip install desksearch</tspan>
+  </text>
+
+  <!-- Line 2: success -->
+  <text x="30" y="96" class="green">Successfully installed desksearch-0.6.0</text>
+
+  <!-- Line 3: blank -->
+
+  <!-- Line 4: desksearch serve -->
+  <text x="30" y="136">
+    <tspan class="prompt">$ </tspan><tspan class="cmd">desksearch serve</tspan>
+  </text>
+
+  <!-- Line 5: emoji + version -->
+  <text x="30" y="168" class="cmd">🔍 DeskSearch v0.6.0</text>
+
+  <!-- Line 6: server URL -->
+  <text x="30" y="192">
+    <tspan class="dim">   Server running at </tspan><tspan class="cyan">http://127.0.0.1:3777</tspan>
+  </text>
+
+  <!-- Line 7: ctrl+c -->
+  <text x="30" y="216" class="dim">   Press Ctrl+C to stop</text>
+
+  <!-- Blinking cursor -->
+  <rect x="30" y="240" width="9" height="18" fill="#27c93f" opacity="0.8">
+    <animate attributeName="opacity" values="0.8;0;0.8" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
+</svg>

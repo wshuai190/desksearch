@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="560">
+  <defs>
+    <filter id="shadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+
+  <!-- Window frame -->
+  <rect x="10" y="10" width="780" height="540" rx="10" ry="10" fill="#0f0f1a" filter="url(#shadow)"/>
+
+  <!-- Title bar -->
+  <rect x="10" y="10" width="780" height="36" rx="10" ry="10" fill="#1a1a2e"/>
+  <rect x="10" y="36" width="780" height="10" fill="#1a1a2e"/>
+
+  <!-- Traffic lights -->
+  <circle cx="34" cy="28" r="6" fill="#ff5f56"/>
+  <circle cx="54" cy="28" r="6" fill="#ffbd2e"/>
+  <circle cx="74" cy="28" r="6" fill="#27c93f"/>
+
+  <!-- Title -->
+  <text x="400" y="33" text-anchor="middle" font-family="Menlo, Monaco, Consolas, monospace" font-size="13" fill="#888">Terminal — DeskSearch</text>
+
+  <style>
+    .prompt { fill: #27c93f; }
+    .cmd { fill: #f0f0f0; }
+    .dim { fill: #888888; }
+    .cyan { fill: #56d4dd; }
+    .yellow { fill: #e5c07b; }
+    .green { fill: #98c379; }
+    .string { fill: #98c379; }
+    .key { fill: #61afef; }
+    .number { fill: #d19a66; }
+    .brace { fill: #c678dd; }
+    text { font-family: Menlo, Monaco, Consolas, monospace; font-size: 13px; }
+  </style>
+
+  <!-- Command -->
+  <text x="30" y="70">
+    <tspan class="prompt">$ </tspan><tspan class="cmd">curl -s </tspan><tspan class="string">"http://127.0.0.1:3777/api/search?q=machine+learning"</tspan>
+  </text>
+  <text x="30" y="88">
+    <tspan class="cmd">  | python3 -m json.tool</tspan>
+  </text>
+
+  <!-- JSON output -->
+  <text x="30" y="116" class="brace">{</text>
+
+  <text x="30" y="136"><tspan class="key">    "results"</tspan><tspan class="cmd">: [</tspan></text>
+  <text x="30" y="156" class="cmd">        {</text>
+
+  <text x="30" y="176"><tspan class="key">            "path"</tspan><tspan class="cmd">: </tspan><tspan class="string">"/Users/dylan/papers/attention-is-all-you-need.pdf"</tspan><tspan class="cmd">,</tspan></text>
+
+  <text x="30" y="196"><tspan class="key">            "score"</tspan><tspan class="cmd">: </tspan><tspan class="number">0.94</tspan><tspan class="cmd">,</tspan></text>
+
+  <text x="30" y="216"><tspan class="key">            "snippet"</tspan><tspan class="cmd">: </tspan><tspan class="string">"...the dominant sequence transduction models</tspan></text>
+  <text x="30" y="236"><tspan class="string">             are based on complex recurrent or convolutional..."</tspan></text>
+
+  <text x="30" y="256" class="cmd">        },</text>
+  <text x="30" y="276" class="cmd">        {</text>
+
+  <text x="30" y="296"><tspan class="key">            "path"</tspan><tspan class="cmd">: </tspan><tspan class="string">"/Users/dylan/notes/ml-fundamentals.md"</tspan><tspan class="cmd">,</tspan></text>
+
+  <text x="30" y="316"><tspan class="key">            "score"</tspan><tspan class="cmd">: </tspan><tspan class="number">0.87</tspan><tspan class="cmd">,</tspan></text>
+
+  <text x="30" y="336"><tspan class="key">            "snippet"</tspan><tspan class="cmd">: </tspan><tspan class="string">"...gradient descent optimizes the loss function</tspan></text>
+  <text x="30" y="356"><tspan class="string">             by iteratively updating model parameters..."</tspan></text>
+
+  <text x="30" y="376" class="cmd">        }</text>
+  <text x="30" y="396" class="cmd">    ],</text>
+
+  <text x="30" y="416"><tspan class="key">    "total"</tspan><tspan class="cmd">: </tspan><tspan class="number">847</tspan><tspan class="cmd">,</tspan></text>
+
+  <text x="30" y="436"><tspan class="key">    "query_ms"</tspan><tspan class="cmd">: </tspan><tspan class="number">0.83</tspan></text>
+
+  <text x="30" y="456" class="brace">}</text>
+
+  <!-- Blinking cursor -->
+  <rect x="30" y="476" width="8" height="16" fill="#27c93f" opacity="0.8">
+    <animate attributeName="opacity" values="0.8;0;0.8" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
+</svg>
