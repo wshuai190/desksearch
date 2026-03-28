@@ -1,0 +1,258 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" width="900" height="420">
+  <style>
+    /* Scene visibility animations - 18s total loop */
+    .scene1 { animation: s1 18s infinite; }
+    .scene2 { animation: s2 18s infinite; }
+    .scene3 { animation: s3 18s infinite; }
+    .scene4 { animation: s4 18s infinite; }
+    .scene5 { animation: s5 18s infinite; }
+
+    @keyframes s1 {
+      0%      { opacity: 1; }
+      14.5%   { opacity: 1; }
+      16.7%   { opacity: 0; }
+      97%     { opacity: 0; }
+      100%    { opacity: 1; }
+    }
+    @keyframes s2 {
+      0%      { opacity: 0; }
+      14.5%   { opacity: 0; }
+      16.7%   { opacity: 1; }
+      31%     { opacity: 1; }
+      33.3%   { opacity: 0; }
+      100%    { opacity: 0; }
+    }
+    @keyframes s3 {
+      0%      { opacity: 0; }
+      31%     { opacity: 0; }
+      33.3%   { opacity: 1; }
+      53%     { opacity: 1; }
+      55.6%   { opacity: 0; }
+      100%    { opacity: 0; }
+    }
+    @keyframes s4 {
+      0%      { opacity: 0; }
+      53%     { opacity: 0; }
+      55.6%   { opacity: 1; }
+      75.5%   { opacity: 1; }
+      77.8%   { opacity: 0; }
+      100%    { opacity: 0; }
+    }
+    @keyframes s5 {
+      0%      { opacity: 0; }
+      75.5%   { opacity: 0; }
+      77.8%   { opacity: 1; }
+      97%     { opacity: 1; }
+      100%    { opacity: 0; }
+    }
+
+    /* Typing cursor blink */
+    .cursor { animation: blink 1s step-end infinite; }
+    @keyframes blink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0; }
+    }
+
+    /* Typing reveal via clip-path for each scene's command */
+    .type-s1 { animation: typeS1 1.2s steps(22) 0.3s both, s1 18s infinite; }
+    .type-s2 { animation: typeS2 1s steps(16) 3.3s both, s2 18s infinite; }
+    .type-s3 { animation: typeS3 1.5s steps(28) 6.3s both, s3 18s infinite; }
+    .type-s4 { animation: typeS4 2s steps(50) 10.3s both, s4 18s infinite; }
+
+    /* Progress bar animation */
+    .progress-bar { animation: progress 2s ease-out 7.5s both, s3 18s infinite; }
+    @keyframes progress {
+      from { width: 0; }
+      to { width: 260px; }
+    }
+
+    /* Result rows fade in */
+    .result-row1 { animation: fadeIn 0.3s ease 11.5s both, s4 18s infinite; }
+    .result-row2 { animation: fadeIn 0.3s ease 11.8s both, s4 18s infinite; }
+    .result-row3 { animation: fadeIn 0.3s ease 12.1s both, s4 18s infinite; }
+
+    /* Feature rows cascade */
+    .feat1 { animation: fadeIn 0.3s ease 14.5s both, s5 18s infinite; }
+    .feat2 { animation: fadeIn 0.3s ease 14.8s both, s5 18s infinite; }
+    .feat3 { animation: fadeIn 0.3s ease 15.1s both, s5 18s infinite; }
+    .feat4 { animation: fadeIn 0.3s ease 15.4s both, s5 18s infinite; }
+    .feat5 { animation: fadeIn 0.3s ease 15.7s both, s5 18s infinite; }
+    .feat6 { animation: fadeIn 0.3s ease 16.0s both, s5 18s infinite; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Base text styles */
+    text { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace; }
+    .prompt { fill: #50fa7b; }
+    .cmd    { fill: #f8f8f2; }
+    .output { fill: #8be9fd; }
+    .dim    { fill: #6272a4; }
+    .yellow { fill: #f1fa8c; }
+    .green  { fill: #50fa7b; }
+    .orange { fill: #ffb86c; }
+    .pink   { fill: #ff79c6; }
+    .white  { fill: #f8f8f2; }
+    .cyan   { fill: #8be9fd; }
+    .comment { fill: #6272a4; }
+  </style>
+
+  <defs>
+    <clipPath id="terminal-clip">
+      <rect x="0" y="0" width="900" height="420" rx="12" />
+    </clipPath>
+  </defs>
+
+  <!-- Terminal window -->
+  <g clip-path="url(#terminal-clip)">
+    <!-- Background -->
+    <rect width="900" height="420" rx="12" fill="#0f0f1a" />
+
+    <!-- Title bar -->
+    <rect width="900" height="40" fill="#1a1a2e" />
+
+    <!-- macOS traffic lights -->
+    <circle cx="24" cy="20" r="7" fill="#ff5f56" />
+    <circle cx="48" cy="20" r="7" fill="#ffbd2e" />
+    <circle cx="72" cy="20" r="7" fill="#27c93f" />
+
+    <!-- Title -->
+    <text x="450" y="25" text-anchor="middle" font-size="13" fill="#6272a4">DeskSearch — Terminal</text>
+
+    <!-- ══════════ Scene 1: Install (0-3s) ══════════ -->
+    <g class="scene1">
+      <text x="30" y="85" font-size="15">
+        <tspan class="prompt">❯ </tspan><tspan class="cmd">pip install desksearch</tspan>
+      </text>
+      <text x="30" y="125" font-size="14" class="dim">Collecting desksearch</text>
+      <text x="30" y="150" font-size="14" class="dim">  Downloading desksearch-0.6.0-py3-none-any.whl (2.1 MB)</text>
+      <text x="30" y="175" font-size="14" class="dim">  Downloading onnxruntime-1.17.0 (6.8 MB)</text>
+      <text x="30" y="200" font-size="14" class="dim">Installing collected packages: onnxruntime, tantivy, desksearch</text>
+      <text x="30" y="240" font-size="15" class="green">✔ Successfully installed desksearch-0.6.0</text>
+
+      <text x="30" y="290" font-size="14" class="dim">Includes: semantic search, ONNX acceleration, 30+ file parsers</text>
+      <text x="30" y="315" font-size="14" class="dim">Run 'desksearch' to launch the web UI, or 'desksearch --help' for CLI</text>
+
+      <!-- Blinking cursor -->
+      <rect class="cursor" x="30" y="345" width="10" height="18" fill="#50fa7b" rx="1" />
+    </g>
+
+    <!-- ══════════ Scene 2: Start Server (3-6s) ══════════ -->
+    <g class="scene2" opacity="0">
+      <text x="30" y="85" font-size="15">
+        <tspan class="prompt">❯ </tspan><tspan class="cmd">desksearch serve</tspan>
+      </text>
+      <text x="30" y="130" font-size="15" class="white">🔍 DeskSearch v0.6.0</text>
+      <text x="30" y="165" font-size="14" class="dim">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</text>
+      <text x="30" y="195" font-size="14">
+        <tspan class="dim">   Server:  </tspan><tspan class="cyan">http://127.0.0.1:3777</tspan>
+      </text>
+      <text x="30" y="220" font-size="14">
+        <tspan class="dim">   Model:   </tspan><tspan class="white">starbucks-2d (regular, 4L×64d)</tspan>
+      </text>
+      <text x="30" y="245" font-size="14">
+        <tspan class="dim">   Runtime: </tspan><tspan class="orange">ONNX INT8</tspan><tspan class="dim"> · 171 chunks/sec</tspan>
+      </text>
+      <text x="30" y="270" font-size="14">
+        <tspan class="dim">   Index:   </tspan><tspan class="white">12,847 documents</tspan><tspan class="dim"> · 284 MB</tspan>
+      </text>
+      <text x="30" y="305" font-size="14" class="dim">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</text>
+      <text x="30" y="335" font-size="14" class="green">✔ Ready — press Ctrl+C to stop</text>
+
+      <rect class="cursor" x="30" y="355" width="10" height="18" fill="#50fa7b" rx="1" />
+    </g>
+
+    <!-- ══════════ Scene 3: Index Files (6-10s) ══════════ -->
+    <g class="scene3" opacity="0">
+      <text x="30" y="85" font-size="15">
+        <tspan class="prompt">❯ </tspan><tspan class="cmd">desksearch index ~/Documents</tspan>
+      </text>
+      <text x="30" y="125" font-size="14" class="white">📄 Discovering files...</text>
+      <text x="30" y="150" font-size="14" class="dim">   Scanning 847 directories</text>
+      <text x="30" y="175" font-size="14" class="cyan">   Found 12,847 files (3.2 GB)</text>
+      <text x="30" y="215" font-size="14" class="white">⚡ Indexing</text>
+
+      <!-- Progress bar background -->
+      <rect x="130" y="202" width="260" height="16" rx="3" fill="#1a1a2e" />
+      <!-- Progress bar fill -->
+      <rect x="130" y="202" width="260" height="16" rx="3" fill="#50fa7b" opacity="0.9" />
+      <text x="400" y="215" font-size="14" class="white"> 100%</text>
+      <text x="450" y="215" font-size="14" class="dim"> — 171 files/sec</text>
+
+      <text x="30" y="255" font-size="14">
+        <tspan class="dim">   PDF: 2,341  DOCX: 1,892  Code: 5,214  Email: 1,847  Other: 1,553</tspan>
+      </text>
+      <text x="30" y="295" font-size="15" class="green">✅ 12,847 files indexed in 75s</text>
+      <text x="30" y="325" font-size="14" class="dim">   Index size: 284 MB · Embedding model: starbucks-2d-regular</text>
+
+      <rect class="cursor" x="30" y="350" width="10" height="18" fill="#50fa7b" rx="1" />
+    </g>
+
+    <!-- ══════════ Scene 4: Search (10-14s) ══════════ -->
+    <g class="scene4" opacity="0">
+      <text x="30" y="85" font-size="15">
+        <tspan class="prompt">❯ </tspan><tspan class="cmd">curl "</tspan><tspan class="cyan">localhost:3777/api/search?q=neural+networks</tspan><tspan class="cmd">"</tspan>
+      </text>
+
+      <!-- Results box -->
+      <rect x="30" y="110" width="620" height="170" rx="6" fill="none" stroke="#44475a" stroke-width="1.5" />
+
+      <!-- Header line -->
+      <line x1="30" y1="140" x2="650" y2="140" stroke="#44475a" stroke-width="1" />
+      <text x="45" y="132" font-size="13" class="dim"> #   File                              Score</text>
+
+      <!-- Result rows -->
+      <text x="45" y="170" font-size="14">
+        <tspan class="yellow"> 1  </tspan><tspan class="white">📄 attention-is-all-you-need.pdf</tspan><tspan class="green">    0.94</tspan>
+      </text>
+      <text x="45" y="200" font-size="14">
+        <tspan class="yellow"> 2  </tspan><tspan class="white">📝 ml-research-notes.md</tspan><tspan class="green">            0.87</tspan>
+      </text>
+      <text x="45" y="230" font-size="14">
+        <tspan class="yellow"> 3  </tspan><tspan class="white">🐍 train_model.py</tspan><tspan class="green">                  0.82</tspan>
+      </text>
+      <text x="45" y="260" font-size="14">
+        <tspan class="dim"> ···  847 more results</tspan>
+      </text>
+
+      <!-- Stats line -->
+      <text x="30" y="310" font-size="14">
+        <tspan class="yellow">847 results</tspan><tspan class="dim"> · </tspan><tspan class="pink">0.83ms</tspan><tspan class="dim"> · </tspan><tspan class="orange">ONNX accelerated</tspan>
+      </text>
+      <text x="30" y="340" font-size="13" class="dim">Hybrid search: BM25 + semantic vectors · Reciprocal Rank Fusion</text>
+
+      <rect class="cursor" x="30" y="365" width="10" height="18" fill="#50fa7b" rx="1" />
+    </g>
+
+    <!-- ══════════ Scene 5: Features (14-18s) ══════════ -->
+    <g class="scene5" opacity="0">
+      <text x="30" y="85" font-size="16" class="orange">⚡ DeskSearch Features</text>
+      <line x1="30" y1="97" x2="300" y2="97" stroke="#44475a" stroke-width="1" />
+
+      <text x="30" y="135" font-size="15">
+        <tspan class="dim">├── </tspan><tspan class="white">🔍 Semantic + keyword hybrid search</tspan>
+      </text>
+      <text x="30" y="175" font-size="15">
+        <tspan class="dim">├── </tspan><tspan class="white">📊 Connectors: email, Chrome, Slack</tspan>
+      </text>
+      <text x="30" y="215" font-size="15">
+        <tspan class="dim">├── </tspan><tspan class="white">🎯 Filters: type, date, size</tspan>
+      </text>
+      <text x="30" y="255" font-size="15">
+        <tspan class="dim">├── </tspan><tspan class="white">🚀 10× faster with ONNX INT8</tspan>
+      </text>
+      <text x="30" y="295" font-size="15">
+        <tspan class="dim">├── </tspan><tspan class="white">🦀 13MB Rust binary — zero dependencies</tspan>
+      </text>
+      <text x="30" y="335" font-size="15">
+        <tspan class="dim">└── </tspan><tspan class="white">🔒 100% offline — your data stays yours</tspan>
+      </text>
+
+      <text x="30" y="385" font-size="13" class="cyan">pip install desksearch</text>
+      <text x="230" y="385" font-size="13" class="dim"> · </text>
+      <text x="245" y="385" font-size="13" class="cyan">github.com/wshuai190/desksearch</text>
+    </g>
+  </g>
+</svg>

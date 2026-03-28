@@ -19,6 +19,10 @@
   <code>0.83ms search</code> · <code>13MB binary</code> · <code>100% offline</code> · <code>50k+ files</code> · <code>10× ONNX speedup</code>
 </p>
 
+<p align="center">
+  <img src="assets/demo-animated.svg" alt="DeskSearch Demo" width="820" />
+</p>
+
 ---
 
 DeskSearch is a local semantic search engine that understands what you're looking for — not just the words you type. Index your documents, code, and emails in seconds. Search in under a millisecond. Everything stays on your machine.
@@ -52,10 +56,6 @@ Available as a **Python package** (`pip install desksearch`) and a **standalone 
 
 ## Quick Start
 
-<p align="center">
-  <img src="assets/demo-install.svg" alt="Quick Start" width="800" />
-</p>
-
 ### Python
 
 ```bash
@@ -76,24 +76,6 @@ chmod +x desksearch
 On first run, DeskSearch walks you through an onboarding wizard to pick folders and a speed tier. After that, one command is all you need.
 
 ---
-
-## Search
-
-<p align="center">
-  <img src="assets/demo-search.svg" alt="Search in Action" width="800" />
-</p>
-
-## Indexing
-
-<p align="center">
-  <img src="assets/demo-index.svg" alt="Indexing Progress" width="800" />
-</p>
-
-## Performance
-
-<p align="center">
-  <img src="assets/demo-benchmark.svg" alt="Benchmark" width="800" />
-</p>
 
 ---
 
