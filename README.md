@@ -16,14 +16,14 @@
 </p>
 
 <p align="center">
-  <code>0.83ms search</code> · <code>12MB binary</code> · <code>100% offline</code> · <code>50k+ files</code>
+  <code>0.83ms search</code> · <code>13MB binary</code> · <code>100% offline</code> · <code>50k+ files</code> · <code>10× ONNX speedup</code>
 </p>
 
 ---
 
 DeskSearch is a local semantic search engine that understands what you're looking for — not just the words you type. Index your documents, code, and emails in seconds. Search in under a millisecond. Everything stays on your machine.
 
-Available as a **Python package** (`pip install desksearch`) and a **standalone Rust binary** (12MB, zero dependencies).
+Available as a **Python package** (`pip install desksearch`) and a **standalone Rust binary** (13MB, zero dependencies).
 
 <p align="center">
   <img src="docs/screenshot.png" alt="DeskSearch" width="720" />
@@ -41,8 +41,12 @@ Available as a **Python package** (`pip install desksearch`) and a **standalone 
 | 📄 | **30+ file types** | PDF, DOCX, PPTX, XLSX, code (20+ languages), email, Jupyter notebooks, archives |
 | 👁 | **Live reindexing** | Built-in file watcher auto-detects changes — your index is always current |
 | 🎨 | **Beautiful web UI** | React frontend with dark mode, live search, file preview, and keyboard shortcuts |
-| 🦀 | **Rust core** | 12MB self-contained binary, <50ms cold startup, no runtime dependencies |
+| 🦀 | **Rust core** | 13MB self-contained binary with PDF/DOCX/PPTX/XLSX parsers, hybrid BM25+dense search, embedded frontend |
 | ☕ | **3 speed tiers** | **Fast** (2-layer, 32d) · **Regular** (4-layer, 64d) · **Pro** (6-layer, 128d) — you pick the trade-off |
+| 🔌 | **Connector plugins** | Local files, email (.eml/.mbox), Chrome bookmarks, Slack exports — extensible architecture |
+| ⚙️ | **ONNX acceleration** | 10× embedding speedup (171 chunks/sec) with INT8 quantization support |
+| 📊 | **Advanced filters** | Filter by file type, date range, size · Sort by relevance, date, size, name · Export as JSON/CSV/text |
+| ⭐ | **Favorites & recents** | Bookmark important files and track recently opened documents |
 
 ---
 
@@ -120,7 +124,7 @@ All commands support `--json` for scripting and automation.
 
 ## Architecture
 
-DeskSearch runs **hybrid retrieval** — every query hits a [Tantivy](https://github.com/quickwit-oss/tantivy) BM25 index and a FAISS dense vector index in parallel, then merges results via Reciprocal Rank Fusion (RRF). Embeddings come from the Starbucks 2D Matryoshka model with layer and dimension truncation, running on ONNX Runtime for 3–5× speedup over PyTorch. The indexing pipeline parses files across 6 parallel workers, chunks at sentence boundaries, and embeds in batches of 256 for maximum throughput.
+DeskSearch runs **hybrid retrieval** — every query hits a [Tantivy](https://github.com/quickwit-oss/tantivy) BM25 index and a FAISS dense vector index in parallel, then merges results via Reciprocal Rank Fusion (RRF). Embeddings come from the Starbucks 2D Matryoshka model with layer and dimension truncation, running on ONNX Runtime for **10× speedup** over PyTorch (171 chunks/sec vs 17). The indexing pipeline parses files across 6 parallel workers, chunks at sentence boundaries, and embeds in batches of 256 for maximum throughput. A **connector plugin system** (v0.6.0) lets you pull in data from local files, email, Chrome bookmarks, and Slack exports via a unified API.
 
 ```
 Your Files (PDF, DOCX, Markdown, Code, ...)
@@ -143,6 +147,21 @@ Your Files (PDF, DOCX, Markdown, Code, ...)
                ▼
      Ranked Results + Snippets
 ```
+
+---
+
+## Connectors (v0.6.0)
+
+DeskSearch supports pluggable data connectors to index content from multiple sources:
+
+| Connector | What it does |
+|---|---|
+| **Local files** | File system scanning with scheduled sync and live re-indexing |
+| **Email** | Parse `.eml` and `.mbox` files with sender, subject, and date extraction |
+| **Chrome bookmarks** | Read your Chrome profile's bookmark hierarchy |
+| **Slack export** | Import Slack ZIP exports with username resolution |
+
+Manage connectors via the API (`/api/connectors/v2/`) or the web UI settings panel. The `ConnectorRegistry` handles discovery, configuration, and sync scheduling.
 
 ---
 

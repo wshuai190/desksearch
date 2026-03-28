@@ -1,27 +1,32 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
-import type { IndexingProgress as IndexingProgressType } from '../types';
 
-// Map technical phase names to human-readable descriptions
-function describePhase(status: string, file?: string | null, message?: string): string {
-  const name = file ? file.split('/').pop() : '';
-  switch (status?.toLowerCase()) {
-    case 'parsing':
-      return name ? `Reading "${name}"` : 'Reading your files…';
-    case 'embedding':
-      return message || 'Understanding your files…';
-    case 'storing':
-      return 'Saving to index…';
-    case 'discovery':
-      return message || 'Finding files to index…';
-    case 'complete':
-      return message || 'Indexing complete';
-    case 'error':
-      return message ? `Error: ${message}` : 'An error occurred';
-    case 'skipped':
-      return name ? `Skipped "${name}"` : 'Skipped file';
-    default:
-      return name ? `Processing "${name}"` : 'Working…';
+interface ProgressData {
+  state: 'idle' | 'discovering' | 'indexing' | 'complete' | 'error';
+  phase: string;
+  processed: number;
+  total: number;
+  percent: number;
+  current_file: string;
+  files_per_sec: number;
+  elapsed_sec: number;
+  errors: { file: string; message: string }[];
+}
+
+function formatElapsed(sec: number): string {
+  if (sec < 60) return `${Math.round(sec)}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}m ${s}s`;
+}
+
+function phaseLabel(phase: string): string {
+  switch (phase) {
+    case 'discovery': return 'Discovering files';
+    case 'parsing': return 'Reading files';
+    case 'embedding': return 'Generating embeddings';
+    case 'storing': return 'Saving to index';
+    default: return phase || 'Processing';
   }
 }
 
@@ -30,59 +35,69 @@ interface IndexingProgressProps {
 }
 
 export default function IndexingProgress({ isIndexing }: IndexingProgressProps) {
-  const [progress, setProgress] = useState<IndexingProgressType | null>(null);
-  const [startTime] = useState(() => Date.now());
-  const [completeSummary, setCompleteSummary] = useState<string | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const [progress, setProgress] = useState<ProgressData | null>(null);
+  const [showComplete, setShowComplete] = useState(false);
+  const [completeSummary, setCompleteSummary] = useState('');
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const poll = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/index/status`);
+      if (!res.ok) return;
+      const data: ProgressData = await res.json();
+      setProgress(data);
+
+      if (data.state === 'complete') {
+        const summary = `Indexed ${data.processed} files in ${formatElapsed(data.elapsed_sec)} (${data.files_per_sec} files/sec)`;
+        setCompleteSummary(summary);
+        setShowComplete(true);
+        // Stop polling
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      }
+    } catch {
+      // ignore fetch errors
+    }
+  }, []);
 
   useEffect(() => {
-    if (!isIndexing) {
-      // Keep the completion message briefly, then clear
-      if (completeSummary) {
-        const timer = setTimeout(() => {
-          setCompleteSummary(null);
-          setProgress(null);
-        }, 5000);
-        return () => clearTimeout(timer);
-      }
-      setProgress(null);
-      return;
-    }
-
-    setCompleteSummary(null);
-
-    // Build the WS URL: the backend endpoint is /ws/index-progress
-    const wsUrl = API_BASE_URL.replace(/^http/, 'ws') + '/ws/index-progress';
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-
-    ws.onmessage = (event) => {
-      try {
-        const data: IndexingProgressType = JSON.parse(event.data);
-        if (data.status === 'complete' && (!data.file || data.message?.startsWith('Done:'))) {
-          // Final completion event — show summary
-          const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
-          setCompleteSummary(data.message || `Complete in ${elapsed}s`);
-          setProgress(null);
-        } else {
-          setProgress(data);
+    if (isIndexing) {
+      setShowComplete(false);
+      setCompleteSummary('');
+      // Start polling at 1s interval
+      poll();
+      intervalRef.current = setInterval(poll, 1000);
+      return () => {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
         }
-      } catch {
-        // ignore parse errors
+      };
+    } else {
+      // When isIndexing goes false, do one final poll to get completion stats
+      poll();
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
       }
-    };
+    }
+  }, [isIndexing, poll]);
 
-    ws.onerror = () => {};
-    ws.onclose = () => {};
+  // Auto-hide completion message after 8s
+  useEffect(() => {
+    if (showComplete) {
+      const timer = setTimeout(() => {
+        setShowComplete(false);
+        setProgress(null);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [showComplete]);
 
-    return () => {
-      ws.close();
-      wsRef.current = null;
-    };
-  }, [isIndexing]);
-
-  // Show completion summary briefly after indexing finishes
-  if (!isIndexing && completeSummary) {
+  // Show completion banner
+  if (showComplete && completeSummary) {
     return (
       <div className="max-w-3xl mx-auto px-3 sm:px-0 mb-3">
         <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800/50 rounded-xl p-3 sm:p-4">
@@ -101,19 +116,15 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
     );
   }
 
-  if (!isIndexing || !progress) {
+  // Nothing to show
+  if (!progress || progress.state === 'idle') {
     if (isIndexing) {
-      // Indexing started but no WS data yet — show a spinner
+      // Just started, no data yet
       return (
         <div className="max-w-3xl mx-auto px-3 sm:px-0 mb-3">
           <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl p-3 sm:p-4">
             <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center flex-shrink-0">
-                <svg className="w-4 h-4 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              </div>
+              <Spinner />
               <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
                 Getting started…
               </span>
@@ -125,43 +136,58 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
     return null;
   }
 
-  const isDiscovery = progress.status === 'discovery';
-  const hasTotal = progress.total > 0;
-  const percent = hasTotal && !isDiscovery
-    ? Math.min(Math.round((progress.current / progress.total) * 100), 100)
-    : null;
+  // Error state
+  if (progress.state === 'error') {
+    return (
+      <div className="max-w-3xl mx-auto px-3 sm:px-0 mb-3">
+        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800/50 rounded-xl p-3 sm:p-4">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-red-100 dark:bg-red-900/40 flex items-center justify-center flex-shrink-0">
+              <svg className="w-4 h-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </div>
+            <span className="text-sm font-medium text-red-800 dark:text-red-300">
+              Indexing failed — {progress.errors.length > 0 ? progress.errors[progress.errors.length - 1].message : 'Unknown error'}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-  const description = describePhase(progress.status, progress.file, progress.message);
+  const isDiscovery = progress.state === 'discovering';
+  const hasPercent = progress.total > 0 && !isDiscovery;
+  const percent = hasPercent ? Math.min(Math.round(progress.percent), 100) : null;
 
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-0 mb-3">
       <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl p-3 sm:p-4">
         <div className="flex items-center gap-3">
-          {/* Animated icon */}
-          <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center flex-shrink-0">
-            <svg className="w-4 h-4 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          </div>
-
+          <Spinner />
           <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between gap-2 mb-1.5">
+            {/* Top row: phase + stats */}
+            <div className="flex items-center justify-between gap-2 mb-1">
               <span className="text-sm font-medium text-amber-800 dark:text-amber-300 truncate">
-                {description}
+                {phaseLabel(progress.phase)}
+                {progress.current_file && (
+                  <span className="font-normal text-amber-600 dark:text-amber-400">
+                    {' — '}{progress.current_file}
+                  </span>
+                )}
               </span>
               {percent !== null && (
-                <span className="text-xs text-amber-600 dark:text-amber-400 flex-shrink-0 tabular-nums">
-                  {progress.current} of {progress.total} ({percent}%)
+                <span className="text-xs text-amber-600 dark:text-amber-400 flex-shrink-0 tabular-nums font-medium">
+                  {percent}%
                 </span>
               )}
             </div>
 
             {/* Progress bar */}
-            <div className="w-full h-1.5 bg-amber-200 dark:bg-amber-800/50 rounded-full overflow-hidden">
+            <div className="w-full h-1.5 bg-amber-200 dark:bg-amber-800/50 rounded-full overflow-hidden mb-1.5">
               {percent !== null ? (
                 <div
-                  className="h-full bg-amber-500 dark:bg-amber-400 rounded-full transition-all duration-500 ease-out"
+                  className="h-full bg-amber-500 dark:bg-amber-400 rounded-full transition-all duration-700 ease-out"
                   style={{ width: `${percent}%` }}
                 />
               ) : (
@@ -172,6 +198,25 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
                     animation: 'indeterminate 1.5s ease-in-out infinite',
                   }}
                 />
+              )}
+            </div>
+
+            {/* Bottom row: detailed stats */}
+            <div className="flex items-center gap-3 text-xs text-amber-600 dark:text-amber-500 tabular-nums">
+              {hasPercent && (
+                <span>{progress.processed} / {progress.total} files</span>
+              )}
+              {isDiscovery && progress.total > 0 && (
+                <span>Found {progress.total} files</span>
+              )}
+              {progress.files_per_sec > 0 && (
+                <span>{progress.files_per_sec} files/sec</span>
+              )}
+              {progress.elapsed_sec > 0 && (
+                <span>{formatElapsed(progress.elapsed_sec)}</span>
+              )}
+              {progress.errors.length > 0 && (
+                <span className="text-red-500">{progress.errors.length} error{progress.errors.length > 1 ? 's' : ''}</span>
               )}
             </div>
           </div>
@@ -185,6 +230,17 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
           100% { margin-left: 70%; width: 30%; }
         }
       `}</style>
+    </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center flex-shrink-0">
+      <svg className="w-4 h-4 text-amber-500 animate-spin" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+      </svg>
     </div>
   );
 }

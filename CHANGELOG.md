@@ -2,6 +2,58 @@
 
 All notable changes to DeskSearch are documented here.
 
+## [0.6.0] - 2026-03-28
+
+### Added
+- **Connector plugin system** — extensible architecture with 4 built-in connectors:
+  - Local files (file system scanning with scheduled sync)
+  - Email (.eml/.mbox parsing with sender/subject/date extraction)
+  - Chrome bookmarks (reads Chrome profile, folder hierarchy)
+  - Slack export (ZIP import with username resolution)
+- **ConnectorRegistry** — discover, enable/disable, configure, sync connectors via API
+- **Connector API** (`/api/connectors/v2/`) — 6 endpoints for managing data sources
+- **Advanced search filters** — filter by file type, date range, file size
+- **Sort options** — sort by relevance, date, size, or name
+- **Export formats** — results as JSON, CSV, or plain text
+- **Favorites system** — bookmark important files via API
+- **Recent files** — track recently opened documents
+- **ONNX model export** — Starbucks model exported to ONNX with INT8 quantization
+  - Fast tier: 36MB (INT8) / 145MB (FP32)
+  - Regular tier: 50MB (INT8) / 199MB (FP32)
+  - Pro tier: 64MB (INT8) / 253MB (FP32)
+- **Rust native binary** — complete rewrite of hot paths in Rust
+  - 13MB standalone binary
+  - PDF/DOCX/PPTX/XLSX parsers
+  - Hybrid BM25 + dense search with usearch
+  - Embedded web frontend
+  - File watcher for live re-indexing
+  - ONNX embedding via `ort` crate (load-dynamic)
+- **Live indexing progress** — real-time progress bar with phase tracking, throughput, current file
+- **`desksearch benchmark`** command for performance testing
+
+### Changed
+- **UI overhaul** — dark mode (navy-black palette), indigo/purple accent system, glass morphism
+- **Settings redesign** — grouped sections with speed tier visual selector
+- **Animations** — slide-up transitions, stagger children, floating logo
+- **Responsive layout** — mobile-friendly settings and search
+- **FastAPI lifespan** — migrated from deprecated `on_event` handlers
+- **Lazy imports** — heavy modules (torch, transformers, FAISS) loaded on demand
+- **Removed ORJSONResponse** — FastAPI handles JSON natively now
+
+### Fixed
+- Collections/topics/duplicates silently broken (wrong method name on store)
+- Settings API missing `search_speed` field
+- `POST /api/index` with no body returned 422 instead of indexing configured folders
+- `/api/status` crashed due to missing `_compute_index_size_mb` function
+- Duplicate `disk_stats()` and `vacuum_if_fragmented()` methods in store
+- Dense-only search results missing file paths
+
+### Performance
+- **10x embedding speedup** — 171 chunks/sec (ONNX) vs 17 chunks/sec (PyTorch)
+- Server startup: **1.3s** (lazy imports)
+- 431 tests passing
+- Deprecation warnings reduced from 124 to 9
+
 ## [0.5.0] - 2026-03-25
 
 ### Added
