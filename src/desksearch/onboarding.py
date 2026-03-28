@@ -152,8 +152,12 @@ def run_onboarding_wizard() -> Config:
 
 def run_initial_index(config: Config) -> None:
     """Run initial indexing with a nice progress display."""
+    import logging
     from desksearch.core.search import HybridSearchEngine
     from desksearch.indexer.pipeline import IndexingPipeline, StatusType
+
+    # Suppress noisy log messages during CLI indexing (parser warnings, etc.)
+    logging.getLogger("desksearch").setLevel(logging.WARNING)
 
     engine = HybridSearchEngine(config)
     pipeline = IndexingPipeline(config, search_engine=engine)
@@ -176,6 +180,7 @@ def run_initial_index(config: Config) -> None:
             total_errors = 0
             total_skipped = 0
             discovered = 0
+            files_parsed = 0
 
             for path in config.index_paths:
                 if not path.is_dir():
@@ -198,6 +203,17 @@ def run_initial_index(config: Config) -> None:
                                             break
                                 except (IndexError, ValueError):
                                     pass
+                        elif status.status == StatusType.PARSING and status.file:
+                            files_parsed += 1
+                            progress.update(
+                                task,
+                                description=f"[cyan]Parsing [bold]{files_parsed}[/bold]/{discovered or '?'} — {Path(status.file).name}",
+                            )
+                        elif status.status == StatusType.EMBEDDING:
+                            progress.update(
+                                task,
+                                description=f"[cyan]Embedding batch... ({files_parsed} files parsed)",
+                            )
                         elif status.status == StatusType.COMPLETE and status.file:
                             total_indexed += 1
                             progress.update(

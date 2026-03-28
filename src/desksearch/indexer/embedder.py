@@ -253,10 +253,13 @@ class Embedder:
         # C++ destructor conflicts that cause SIGSEGV at exit on macOS.
         export_script = f'''
 import sys, os, logging, warnings
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING)
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+os.environ["SAFETENSORS_FAST_GPU"] = "0"
 warnings.filterwarnings("ignore", message=".*not used when initializing.*")
+warnings.filterwarnings("ignore", message=".*not sharded.*")
+warnings.filterwarnings("ignore", message=".*TracerWarning.*")
 
 import torch
 import torch.nn as nn
@@ -440,7 +443,10 @@ print("EXPORT_DONE")
         After saving, the full model is removed from HuggingFace cache.
         """
         import os
+        import warnings
         os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+        warnings.filterwarnings("ignore", message=".*not sharded.*")
+        warnings.filterwarnings("ignore", message=".*not used when initializing.*")
         from transformers import AutoTokenizer, AutoModel, AutoConfig
 
         local_path = self._get_local_model_path()
@@ -457,11 +463,12 @@ print("EXPORT_DONE")
             self.model_name,
             num_hidden_layers=self._MAX_LAYERS,
         )
-        # Suppress "Some weights were not used" warnings (expected for truncated layers)
+        # Suppress noisy transformers warnings (expected for truncated layers)
         import logging as _logging
+        for _name in ("transformers.modeling_utils", "transformers.integrations.tensor_parallel"):
+            _logging.getLogger(_name).setLevel(_logging.ERROR)
         _tf_logger = _logging.getLogger("transformers.modeling_utils")
         _prev_level = _tf_logger.level
-        _tf_logger.setLevel(_logging.ERROR)
         model = AutoModel.from_pretrained(self.model_name, config=config)
         _tf_logger.setLevel(_prev_level)
         model.save_pretrained(local_path)

@@ -1,6 +1,6 @@
 // DeskSearch Service Worker
 // IMPORTANT: bump this version on every release so stale HTML/assets are purged
-const CACHE_NAME = 'desksearch-v0.6.4';
+const CACHE_NAME = 'desksearch-v0.6.5';
 
 // Assets to pre-cache on install
 const PRECACHE_URLS = [
