@@ -24,8 +24,13 @@ Thumbs.db
 # LocalSearch data
 .localsearch/
 
-# Job search / personal
+# Internal planning docs
+OVERNIGHT_PLAN.md
+REWRITE_PLAN.md
+SLOT*_RESULTS.md
+BENCHMARK_RESULTS.md
+
+# Scripts / personal
+publish-pypi.sh
 job-search/
 arxiv-daily/
-OVERNIGHT_PLAN.md
-publish-pypi.sh
