@@ -161,7 +161,10 @@ def _compute_index_size_mb() -> float:
         if d.exists():
             for root, _, files in os.walk(d):
                 for f in files:
-                    total += (Path(root) / f).stat().st_size
+                    try:
+                        total += (Path(root) / f).stat().st_size
+                    except OSError:
+                        pass
     return round(total / (1024 * 1024), 2)
 
 

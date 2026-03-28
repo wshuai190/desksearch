@@ -137,3 +137,21 @@ All notable changes to DeskSearch are documented here.
 - Rich terminal output with progress bars
 - Document parsing for PDF, DOCX, TXT, Markdown, and common code files
 - `desksearch serve` to start local web server on port 3777
+
+## [0.6.1] - 2026-03-28
+
+### Fixed
+- Tier naming: "regular" → "middle" (fast / middle / pro)
+- Similarity metric: dot product (inner product) instead of cosine — matches Starbucks model training
+- Removed incorrect L2 normalization from dense index
+- Corrected Starbucks paper author order (Zhuang*, Wang*, Zheng, Koopman, Zuccon)
+- Duplicate `disk_stats()` and `vacuum_if_fragmented()` methods in store
+- Collections/topics/duplicates silently broken (wrong store method name)
+- Settings API missing `search_speed` field
+- `POST /api/index` with no body returned 422
+
+### Added
+- "Powered by Starbucks Embeddings" section in README with paper citation and BibTeX
+- Real screenshots of every UI page (home, search, dashboard, settings, data sources, files)
+- Animated SVG terminal demo in README
+- Starbucks paper reference in Settings UI and pyproject.toml keywords

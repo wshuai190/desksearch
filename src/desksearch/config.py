@@ -6,7 +6,7 @@ import json
 import os
 
 
-DEFAULT_DATA_DIR = Path.home() / ".desksearch"
+DEFAULT_DATA_DIR = Path(os.environ.get("DESKSEARCH_DATA_DIR", str(Path.home() / ".desksearch")))
 DEFAULT_INDEX_PATHS = [
     Path.home() / "Documents",
     Path.home() / "Desktop",

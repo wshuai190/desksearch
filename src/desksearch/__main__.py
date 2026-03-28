@@ -32,6 +32,8 @@ from desksearch.config import Config
 
 import os as _os
 _os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+# Prevent OpenMP crash when both FAISS and ONNX Runtime link libomp (macOS)
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 console = Console()
 err_console = Console(stderr=True)
@@ -51,10 +53,18 @@ def _print_json(data: object) -> None:
 # ---------------------------------------------------------------------------
 
 class _DefaultGroup(click.Group):
-    """Click group that runs onboarding or serve when invoked with no subcommand."""
+    """Click group that runs onboarding or serve when invoked with no subcommand.
+
+    Note: ``ctx.invoked_subcommand`` is not yet set when ``invoke()`` is
+    called — Click populates it *inside* ``super().invoke()``.  We must
+    check ``ctx._protected_args`` (which holds the subcommand token after
+    ``parse_args``) to decide whether a real subcommand was requested.
+    """
 
     def invoke(self, ctx: click.Context) -> None:
-        if ctx.invoked_subcommand is None:
+        # _protected_args is non-empty when a subcommand was parsed
+        has_subcommand = bool(ctx._protected_args or ctx.args)
+        if not has_subcommand:
             from desksearch.onboarding import is_first_run
 
             if is_first_run():
@@ -675,6 +685,44 @@ def config_show(as_json: bool = False) -> None:
         table.add_row(key, str(value), desc)
 
     console.print(table)
+
+
+# "list" is an alias for "show"
+@config.command("list", hidden=True)
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON for scripting")
+@click.pass_context
+def config_list(ctx: click.Context, as_json: bool = False) -> None:
+    """List all configuration values (alias for 'show')."""
+    ctx.invoke(config_show, as_json=as_json)
+
+
+@config.command("get", epilog="""
+\b
+Examples:
+  desksearch config get port
+  desksearch config get search_speed
+  desksearch config get embedding_model --json
+""")
+@click.argument("key")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON for scripting")
+def config_get(key: str, as_json: bool) -> None:
+    """Get a single configuration value.
+
+    KEY is the config field name (e.g. port, search_speed).
+    """
+    cfg = Config.load()
+    data = cfg.model_dump(mode="json")
+
+    if key not in data:
+        known = ", ".join(sorted(data.keys()))
+        err_console.print(f"[red]Unknown config key:[/red] [bold]{key}[/bold]")
+        err_console.print(f"[dim]Valid keys: {known}[/dim]")
+        sys.exit(1)
+
+    if as_json:
+        _print_json({"key": key, "value": data[key]})
+    else:
+        console.print(f"[bold]{key}[/bold] = [cyan]{data[key]}[/cyan]")
 
 
 @config.command("set", epilog="""

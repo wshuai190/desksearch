@@ -407,8 +407,9 @@ class IndexingPipeline:
                 n_chunks / embed_s if embed_s > 0 else 0,
             )
 
-            # Store results per-file
+            # Store results per-file, then batch-add to search engine
             completed: list[tuple[Path, int]] = []
+            batch_search_docs: list[tuple[str, str, np.ndarray]] = []
             emb_offset = 0
             for pf in pending_files:
                 num_chunks = len(pf.chunks)
@@ -432,24 +433,28 @@ class IndexingPipeline:
                 store_s = time.perf_counter() - t_store
                 stage_times["store"] += store_s
 
-                # Feed into search engine if available
-                t_idx = time.perf_counter()
+                # Collect search engine docs for batch insert (defer_save)
                 if self.search_engine is not None:
-                    try:
-                        docs = [
-                            (str(cid), ct, emb)
-                            for cid, ct, emb in zip(chunk_ids, pf.chunk_texts, file_embeddings)
-                        ]
-                        self.search_engine.add_documents(docs)
-                    except Exception as exc:
-                        logger.warning("[%s] Search engine update failed: %s", pf.path.name, exc)
-                stage_times["index"] += time.perf_counter() - t_idx
+                    for cid, ct, emb in zip(chunk_ids, pf.chunk_texts, file_embeddings):
+                        batch_search_docs.append((str(cid), ct, emb))
 
                 all_embeddings.append(file_embeddings)
                 all_chunk_ids.extend(chunk_ids)
                 indexed += 1
                 total_chunks_produced += num_chunks
                 completed.append((pf.path, num_chunks))
+
+            # Batch-add all docs to search engine with deferred save
+            # (avoids writing FAISS index to disk after every file)
+            if batch_search_docs and self.search_engine is not None:
+                t_idx = time.perf_counter()
+                try:
+                    self.search_engine.add_documents(
+                        batch_search_docs, defer_save=True,
+                    )
+                except Exception as exc:
+                    logger.warning("Batch search engine update failed: %s", exc)
+                stage_times["index"] += time.perf_counter() - t_idx
 
             pending_files.clear()
             pending_chunk_texts.clear()
@@ -594,6 +599,14 @@ class IndexingPipeline:
             )
             del combined  # release before returning
             log_memory_delta(mem_pre, "after-embeddings-save")
+
+        # Persist search engine indexes (FAISS + BM25) now that all batches
+        # used defer_save=True.  One disk write instead of per-batch.
+        if self.search_engine is not None:
+            try:
+                self.search_engine.save()
+            except Exception as exc:
+                logger.warning("Failed to save search engine index: %s", exc)
 
         log_memory_delta(mem_start, "index-directory-end")
 
