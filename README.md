@@ -120,6 +120,46 @@ All commands support `--json` for scripting and automation.
 
 ---
 
+## Configuration
+
+DeskSearch stores its config at `~/.desksearch/config.json`. You can view and modify all settings via the CLI:
+
+```bash
+desksearch config show            # show all settings
+desksearch config get search_speed
+desksearch config set search_speed fast
+```
+
+### Key settings
+
+| Setting | Default | Description |
+|---|---|---|
+| `search_speed` | `middle` | Speed tier: `fast` (2-layer, 32d, ~3x faster), `middle` (4-layer, 64d), `pro` (6-layer, 128d, best quality) |
+| `chunk_size` | `512` | Characters per chunk. Smaller = more precise snippets, larger = faster indexing |
+| `chunk_overlap` | `64` | Overlap between chunks for context continuity |
+| `max_file_size_mb` | `50` | Skip files larger than this |
+| `host` | `127.0.0.1` | API server bind address |
+| `port` | `3777` | API server port |
+| `api_key` | `null` | Bearer token for API auth (if set, `/api/v1/search` requires it) |
+| `excluded_dirs` | `.git`, `node_modules`, `__pycache__`, ... | Directories to skip during indexing |
+
+### Speed tiers
+
+| Tier | Layers | Dimensions | Throughput | Best for |
+|---|---|---|---|---|
+| `fast` | 2 | 32 | ~180 chunks/sec | Large corpora, older hardware, quick setup |
+| `middle` | 4 | 64 | ~60 chunks/sec | **Default** — balanced speed and quality |
+| `pro` | 6 | 128 | ~30 chunks/sec | Best accuracy, research use |
+
+Switch tiers at any time (re-index to apply):
+
+```bash
+desksearch config set search_speed fast
+desksearch index ~/Documents    # re-index with new tier
+```
+
+---
+
 ## DeskSearch vs. Alternatives
 
 | | **DeskSearch** | Spotlight | Everything | Alfred |
