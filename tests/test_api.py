@@ -338,3 +338,67 @@ async def test_track_open_and_list(client, tmp_path):
     body = resp.json()
     assert len(body["entries"]) == 1
     assert body["entries"][0]["doc_id"] == doc_id
+
+
+# ---------------------------------------------------------------------------
+# Bug fix regression tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_settings_includes_search_speed(client):
+    """Bug fix: GET /api/settings must include search_speed field."""
+    resp = await client.get("/api/settings")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "search_speed" in body, "search_speed missing from settings response"
+    assert body["search_speed"] in ("fast", "regular", "pro")
+
+
+@pytest.mark.anyio
+async def test_settings_update_search_speed(client):
+    """Bug fix: PUT /api/settings with search_speed should be accepted."""
+    resp = await client.put(
+        "/api/settings",
+        json={"search_speed": "fast"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["search_speed"] == "fast"
+
+
+@pytest.mark.anyio
+async def test_index_no_body_uses_configured_paths(client, tmp_path):
+    """Bug fix: POST /api/index with no body should use configured index_paths."""
+    # First add a folder to the config via the folders endpoint
+    test_dir = tmp_path / "testfolder"
+    test_dir.mkdir()
+    (test_dir / "hello.txt").write_text("hello world")
+    resp = await client.post("/api/folders", json={"path": str(test_dir)})
+    assert resp.status_code == 200
+
+    # Now POST /api/index with no body — should use configured paths
+    resp = await client.post("/api/index")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["is_indexing"] is True
+
+
+@pytest.mark.anyio
+async def test_index_no_body_no_folders_returns_400(app):
+    """POST /api/index with no body and no configured folders returns 400."""
+    # Use a clean app with no index_paths
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        resp = await ac.post("/api/index")
+        assert resp.status_code == 400
+
+
+@pytest.mark.anyio
+async def test_collections_endpoint(client):
+    """Bug fix: /api/collections should not crash with get_chunks_for_document."""
+    resp = await client.get("/api/collections")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "topics" in body
+    assert "total_docs_clustered" in body

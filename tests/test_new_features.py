@@ -774,6 +774,33 @@ class TestCollectionsUnit:
         # The very similar doc should be first
         assert result[0]["doc_id"] == 2
 
+    def test_build_doc_embeddings_uses_get_chunks(self, tmp_path):
+        """Bug fix: build_doc_embeddings must call store.get_chunks(), not
+        the nonexistent store.get_chunks_for_document()."""
+        from desksearch.core.collections import build_doc_embeddings
+        from desksearch.indexer.store import MetadataStore
+        from pathlib import Path
+
+        # Set up a real store with a document and chunks
+        store = MetadataStore(tmp_path / "test.db")
+        test_file = tmp_path / "hello.txt"
+        test_file.write_text("hello world test content")
+        doc_id = store.upsert_document(test_file, num_chunks=1)
+        chunk_ids = store.add_chunks(doc_id, [("hello world test content", 0, 0)])
+
+        # Create matching embeddings
+        emb_path = tmp_path / "embeddings"
+        emb_path.mkdir()
+        embs = np.random.rand(1, DIM).astype(np.float32)
+        np.save(str(emb_path / "embeddings.npy"), embs)
+        np.save(str(emb_path / "chunk_ids.npy"), np.array(chunk_ids))
+
+        # This should NOT raise AttributeError about get_chunks_for_document
+        doc_embeddings, doc_paths, doc_filenames = build_doc_embeddings(store, emb_path)
+        assert doc_id in doc_embeddings
+        assert doc_filenames[doc_id] == "hello.txt"
+        store.close()
+
 
 # ---------------------------------------------------------------------------
 # Onboarding unit tests
