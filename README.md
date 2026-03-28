@@ -30,36 +30,8 @@ DeskSearch is a local semantic search engine that understands what you're lookin
 Available as a **Python package** (`pip install desksearch`) and a **standalone Rust binary** (13MB, zero dependencies).
 
 <p align="center">
-  <img src="assets/screenshot-home.png" alt="DeskSearch — Search Home" width="720" />
+  <img src="assets/hero-ui.svg" alt="DeskSearch Web UI" width="820" />
 </p>
-
-<p align="center">
-  <img src="assets/screenshot-search.jpg" alt="DeskSearch — Search Results" width="720" />
-</p>
-
-<p align="center">
-  <img src="assets/screenshot-dashboard.png" alt="DeskSearch — Dashboard" width="720" />
-</p>
-
-<details>
-<summary><strong>More screenshots</strong></summary>
-
-<p align="center">
-  <strong>Settings — Speed Tiers & File Types</strong><br/>
-  <img src="assets/screenshot-settings.png" alt="DeskSearch — Settings" width="720" />
-</p>
-
-<p align="center">
-  <strong>Data Sources — Connectors</strong><br/>
-  <img src="assets/screenshot-datasources.png" alt="DeskSearch — Data Sources" width="720" />
-</p>
-
-<p align="center">
-  <strong>File Explorer</strong><br/>
-  <img src="assets/screenshot-files.jpg" alt="DeskSearch — Files" width="720" />
-</p>
-
-</details>
 
 ---
 
@@ -89,7 +61,15 @@ Available as a **Python package** (`pip install desksearch`) and a **standalone 
 ```bash
 pip install desksearch
 desksearch
-# → opens http://localhost:3777
+# → opens http://localhost:3777 with onboarding wizard
+```
+
+On first run, DeskSearch auto-downloads the Starbucks embedding model and exports an optimised ONNX (INT8) version. This takes ~30 seconds once; subsequent starts are instant.
+
+For full Starbucks model support (auto-export), also install torch:
+
+```bash
+pip install desksearch[full]   # includes torch + onnx for auto-export
 ```
 
 ### Rust

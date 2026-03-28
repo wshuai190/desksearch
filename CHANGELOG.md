@@ -2,6 +2,30 @@
 
 All notable changes to DeskSearch are documented here.
 
+## [0.6.4] - 2026-03-28
+
+### Fixed
+- **ONNX auto-export on first run** — model is now automatically exported to ONNX (INT8) in an isolated subprocess on first use; no more `FileNotFoundError` for new installs
+- **Export script filename mismatch** — `export_onnx.py` now produces correct `-int8.onnx` filenames matching what the embedder expects
+- **`_warm_search_engine()` crash** — SDK and daemon passed 4 args to a 3-param function; removed extra `embedder` argument
+- **FAISS reconstruction zero-padding** — `_reconstruct_all_locked()` used `ntotal` (includes deleted) instead of live vector count, corrupting IVF training data
+- **Soft-deleted vectors lost on restart** — HNSW soft-deleted set is now rebuilt from orphaned FAISS IDs on index reload
+- **Missing `await` in search endpoint** — doc embeddings for related-doc feature now actually load
+- **Unbounded thread creation** — async search now uses dedicated 2-worker executor instead of default
+- **Service worker cache stale assets** — versioned cache name + network-first HTML prevents 404s after upgrades
+- **Onboarding dead end** — added manual folder path input when no folders are auto-detected
+- **Slow file discovery** — replaced `rglob("*")` with `os.walk` + directory pruning (skips `.git`, `node_modules`, etc. entirely)
+- **BERT warning spam** — suppressed expected "weights not used" messages during model download/export
+- **Invalid Rust edition** — fixed `edition = "2024"` to `"2021"` in `rust/Cargo.toml`
+- **Version mismatches** — synced electron, UI, and Rust versions to match Python package
+- **Firefox tempfile leak** — added proper `try/finally` cleanup in browser bookmarks plugin
+- **Test marker** — fixed `@pytest.mark.asyncio` → `@pytest.mark.anyio`
+
+### Changed
+- Added `onnx` to `[full]` optional dependencies for auto-export support
+- Added `src/ui/dist/` to `.gitignore` (intermediate build output)
+- UI rebuilt with updated Onboarding component
+
 ## [0.6.0] - 2026-03-28
 
 ### Added

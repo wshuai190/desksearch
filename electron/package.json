@@ -1,7 +1,7 @@
 {
   "name": "desksearch",
   "productName": "DeskSearch",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "description": "Private semantic search engine for your local files",
   "main": "main.js",
   "scripts": {

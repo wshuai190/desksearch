@@ -158,6 +158,11 @@ def run_initial_index(config: Config) -> None:
     engine = HybridSearchEngine(config)
     pipeline = IndexingPipeline(config, search_engine=engine)
 
+    # Warm up the embedding model so the first file doesn't stall
+    console.print("[dim]Loading embedding model...[/dim]")
+    pipeline.embedder.warmup()
+    console.print("[dim]Model ready.[/dim]\n")
+
     try:
         with Progress(
             SpinnerColumn(),

@@ -78,7 +78,19 @@ jobs:
 
       - name: Build Electron app
         working-directory: electron
+        env:
+          # Skip auto-discovery of signing certificates (we ad-hoc sign below)
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: npm ci && npm run dist:${{ matrix.platform }}
+
+      - name: Ad-hoc sign macOS app (prevents "damaged" Gatekeeper error)
+        if: matrix.platform == 'mac'
+        run: |
+          APP=$(find dist/electron -name "*.app" -maxdepth 2 | head -1)
+          if [ -n "$APP" ]; then
+            codesign --force --deep --sign - "$APP"
+            echo "Ad-hoc signed: $APP"
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

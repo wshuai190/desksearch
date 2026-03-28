@@ -252,9 +252,11 @@ class Embedder:
         # Run ONNX export in an isolated subprocess to prevent torch/FAISS
         # C++ destructor conflicts that cause SIGSEGV at exit on macOS.
         export_script = f'''
-import sys, os, logging
+import sys, os, logging, warnings
 logging.basicConfig(level=logging.INFO)
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+os.environ["TRANSFORMERS_VERBOSITY"] = "error"
+warnings.filterwarnings("ignore", message=".*not used when initializing.*")
 
 import torch
 import torch.nn as nn
@@ -437,6 +439,8 @@ print("EXPORT_DONE")
         The full 12-layer model is never kept; only layers 0-5 are saved.
         After saving, the full model is removed from HuggingFace cache.
         """
+        import os
+        os.environ["TRANSFORMERS_VERBOSITY"] = "error"
         from transformers import AutoTokenizer, AutoModel, AutoConfig
 
         local_path = self._get_local_model_path()
@@ -453,7 +457,13 @@ print("EXPORT_DONE")
             self.model_name,
             num_hidden_layers=self._MAX_LAYERS,
         )
+        # Suppress "Some weights were not used" warnings (expected for truncated layers)
+        import logging as _logging
+        _tf_logger = _logging.getLogger("transformers.modeling_utils")
+        _prev_level = _tf_logger.level
+        _tf_logger.setLevel(_logging.ERROR)
         model = AutoModel.from_pretrained(self.model_name, config=config)
+        _tf_logger.setLevel(_prev_level)
         model.save_pretrained(local_path)
         config.save_pretrained(local_path)
 

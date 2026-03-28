@@ -164,30 +164,32 @@ class IndexingPipeline:
     def discover_files(self, directory: Path) -> list[Path]:
         """Discover all indexable files in a directory.
 
-        Respects excluded_dirs and file_extensions from config.
-        Skips files larger than max_file_size_mb.
+        Uses os.walk with directory pruning so that excluded dirs (e.g.
+        .git, node_modules, __pycache__) are never descended into.  This
+        is dramatically faster than rglob on large trees.
         """
+        import os
+
         extensions = set(self.config.file_extensions)
         excluded = set(self.config.excluded_dirs)
         max_size = self.config.max_file_size_mb * 1024 * 1024
         files: list[Path] = []
 
-        for path in directory.rglob("*"):
-            if not path.is_file():
-                continue
-            # Check excluded directories
-            if any(part in excluded for part in path.parts):
-                continue
-            # Check extension
-            if path.suffix.lower() not in extensions:
-                continue
-            # Check file size
-            try:
-                if path.stat().st_size > max_size:
+        for dirpath, dirnames, filenames in os.walk(directory):
+            # Prune excluded directories IN-PLACE so os.walk skips them
+            dirnames[:] = [d for d in dirnames if d not in excluded]
+
+            for fname in filenames:
+                ext = os.path.splitext(fname)[1].lower()
+                if ext not in extensions:
                     continue
-            except OSError:
-                continue
-            files.append(path)
+                full = os.path.join(dirpath, fname)
+                try:
+                    if os.path.getsize(full) > max_size:
+                        continue
+                except OSError:
+                    continue
+                files.append(Path(full))
 
         return sorted(files)
 
