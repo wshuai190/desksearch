@@ -23,9 +23,9 @@ MODEL_DIR = Path.home() / ".desksearch" / "models"
 SOURCE_MODEL = MODEL_DIR / "starbucks-6layer"
 
 TIERS = [
-    {"name": "fast",    "layers": 2, "dim": 32,  "output": "starbucks-fast.onnx"},
-    {"name": "middle",  "layers": 4, "dim": 64,  "output": "starbucks-middle.onnx"},
-    {"name": "pro",     "layers": 6, "dim": 128, "output": "starbucks-pro.onnx"},
+    {"name": "fast",    "layers": 2, "dim": 32,  "output": "starbucks-fast-int8.onnx"},
+    {"name": "middle",  "layers": 4, "dim": 64,  "output": "starbucks-middle-int8.onnx"},
+    {"name": "pro",     "layers": 6, "dim": 128, "output": "starbucks-pro-int8.onnx"},
 ]
 
 
@@ -69,11 +69,12 @@ def export_tier(tier, tokenizer):
     dummy_input_ids = torch.ones(1, 32, dtype=torch.long)
     dummy_attention_mask = torch.ones(1, 32, dtype=torch.long)
 
-    # Export to ONNX (legacy exporter for self-contained files)
+    # Export to ONNX (FP32 first, then quantize to INT8)
+    fp32_path = output_path.with_suffix(".fp32.onnx")
     torch.onnx.export(
         wrapped,
         (dummy_input_ids, dummy_attention_mask),
-        str(output_path),
+        str(fp32_path),
         input_names=["input_ids", "attention_mask"],
         output_names=["last_hidden_state"],
         dynamic_axes={
@@ -86,8 +87,18 @@ def export_tier(tier, tokenizer):
         dynamo=False,
     )
 
+    # INT8 dynamic quantization for speed
+    try:
+        from onnxruntime.quantization import quantize_dynamic, QuantType
+        quantize_dynamic(str(fp32_path), str(output_path), weight_type=QuantType.QInt8)
+        fp32_path.unlink(missing_ok=True)
+        print(f"✓ Exported {name} (INT8 quantized): {output_path.stat().st_size / (1024 * 1024):.2f} MB")
+    except ImportError:
+        # Fallback: rename FP32 as the output (no quantization available)
+        fp32_path.rename(output_path)
+        print(f"✓ Exported {name} (FP32, onnxruntime quantization not available): {output_path.stat().st_size / (1024 * 1024):.2f} MB")
+
     size_mb = output_path.stat().st_size / (1024 * 1024)
-    print(f"✓ Exported {name}: {size_mb:.2f} MB")
     return size_mb
 
 

@@ -116,28 +116,32 @@ class BrowserBookmarksConnector(BaseConnectorPlugin):
             return []
         docs: list[Document] = []
         # Firefox locks places.sqlite — copy to a temp file to read safely.
+        tmp = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
+        tmp_path = Path(tmp.name)
+        tmp.close()
         try:
-            tmp = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
-            tmp.close()
-            shutil.copy2(self._firefox_path, tmp.name)
-            conn = sqlite3.connect(tmp.name)
-            cursor = conn.execute(
-                "SELECT mb.title, mp.url FROM moz_bookmarks mb "
-                "JOIN moz_places mp ON mb.fk = mp.id "
-                "WHERE mp.url NOT LIKE 'place:%'"
-            )
-            for title, url in cursor.fetchall():
-                title = title or url
-                uid = hashlib.sha256(url.encode()).hexdigest()[:16]
-                docs.append(Document(
-                    id=f"bookmark:firefox:{uid}",
-                    title=title,
-                    content=f"{title}\n{url}",
-                    source="firefox",
-                    metadata={"url": url},
-                ))
-            conn.close()
-            Path(tmp.name).unlink(missing_ok=True)
+            shutil.copy2(self._firefox_path, tmp_path)
+            conn = sqlite3.connect(str(tmp_path))
+            try:
+                cursor = conn.execute(
+                    "SELECT mb.title, mp.url FROM moz_bookmarks mb "
+                    "JOIN moz_places mp ON mb.fk = mp.id "
+                    "WHERE mp.url NOT LIKE 'place:%'"
+                )
+                for title, url in cursor.fetchall():
+                    title = title or url
+                    uid = hashlib.sha256(url.encode()).hexdigest()[:16]
+                    docs.append(Document(
+                        id=f"bookmark:firefox:{uid}",
+                        title=title,
+                        content=f"{title}\n{url}",
+                        source="firefox",
+                        metadata={"url": url},
+                    ))
+            finally:
+                conn.close()
         except Exception:
             logger.exception("Failed to read Firefox bookmarks")
+        finally:
+            tmp_path.unlink(missing_ok=True)
         return docs

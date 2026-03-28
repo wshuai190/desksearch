@@ -40,6 +40,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [loading, setLoading] = useState(false);
   const [indexingStarted, setIndexingStarted] = useState(false);
   const [fileCount, setFileCount] = useState(0);
+  const [manualPath, setManualPath] = useState('');
 
   // Detect folders when entering the folders step
   useEffect(() => {
@@ -82,6 +83,18 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
       return next;
     });
   }, []);
+
+  const addManualFolder = useCallback(() => {
+    const trimmed = manualPath.trim();
+    if (!trimmed) return;
+    // Add to folders list if not already there
+    if (!folders.some(f => f.path === trimmed)) {
+      const name = trimmed.split('/').filter(Boolean).pop() || trimmed;
+      setFolders(prev => [...prev, { path: trimmed, name, category: 'documents' }]);
+    }
+    setSelected(prev => new Set(prev).add(trimmed));
+    setManualPath('');
+  }, [manualPath, folders]);
 
   const handleStartIndexing = async () => {
     if (selected.size === 0) return;
@@ -173,10 +186,29 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               ))}
             </div>
           ) : folders.length === 0 ? (
-            <div className="text-center py-10 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-2xl">
-              <p className="text-gray-500 dark:text-gray-400 text-sm">
-                No common folders detected. You can add folders manually after setup.
-              </p>
+            <div className="space-y-4">
+              <div className="text-center py-6 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-2xl">
+                <p className="text-gray-500 dark:text-gray-400 text-sm">
+                  No common folders detected. Add a folder path below to get started.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={manualPath}
+                  onChange={e => setManualPath(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addManualFolder()}
+                  placeholder="Enter folder path, e.g. ~/Documents"
+                  className="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-surface text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue"
+                />
+                <button
+                  onClick={addManualFolder}
+                  disabled={!manualPath.trim()}
+                  className="tap-sm px-5 py-3 bg-accent-blue text-white rounded-xl font-medium text-sm hover:bg-accent-blue-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  Add
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-2">
@@ -211,6 +243,27 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
                   </label>
                 );
               })}
+            </div>
+          )}
+
+          {/* Add folder manually */}
+          {folders.length > 0 && (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={manualPath}
+                onChange={e => setManualPath(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && addManualFolder()}
+                placeholder="Add another folder path…"
+                className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-surface text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue"
+              />
+              <button
+                onClick={addManualFolder}
+                disabled={!manualPath.trim()}
+                className="tap-sm px-4 py-2.5 bg-accent-blue text-white rounded-xl font-medium text-sm hover:bg-accent-blue-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Add
+              </button>
             </div>
           )}
 

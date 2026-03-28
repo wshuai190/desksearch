@@ -1,5 +1,6 @@
 // DeskSearch Service Worker
-const CACHE_NAME = 'desksearch-v1';
+// IMPORTANT: bump this version on every release so stale HTML/assets are purged
+const CACHE_NAME = 'desksearch-v0.6.3';
 
 // Assets to pre-cache on install
 const PRECACHE_URLS = [
@@ -9,6 +10,7 @@ const PRECACHE_URLS = [
 ];
 
 self.addEventListener('install', (event) => {
+  // Force the new SW to activate immediately (don't wait for old tabs to close)
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(PRECACHE_URLS);
@@ -17,6 +19,7 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('activate', (event) => {
+  // Delete ALL old caches so stale index.html / assets are purged
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
@@ -40,33 +43,36 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(
-    caches.match(request).then((cached) => {
-      // Return cached version if available (cache-first for static assets)
-      if (cached) {
-        // Refresh cache in background (stale-while-revalidate for JS/CSS)
-        if (url.pathname.startsWith('/assets/')) {
-          fetch(request).then((response) => {
-            if (response.ok) {
-              caches.open(CACHE_NAME).then((cache) => cache.put(request, response));
-            }
-          }).catch(() => {});
-        }
-        return cached;
-      }
+  // HTML pages: network-first (always get fresh HTML to pick up new asset hashes)
+  const isNavigation = request.headers.get('accept')?.includes('text/html')
+    || url.pathname === '/';
 
-      // Network with cache fallback
-      return fetch(request).then((response) => {
-        if (response.ok && request.method === 'GET') {
+  if (isNavigation) {
+    event.respondWith(
+      fetch(request).then((response) => {
+        if (response.ok) {
           const clone = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
         }
         return response;
       }).catch(() => {
-        // Offline fallback: serve index.html for navigation requests
-        if (request.headers.get('accept')?.includes('text/html')) {
-          return caches.match('/') || caches.match('/index.html');
+        return caches.match('/') || new Response('Offline', { status: 503 });
+      })
+    );
+    return;
+  }
+
+  // Static assets (JS/CSS with hashed filenames): cache-first
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      if (cached) return cached;
+      return fetch(request).then((response) => {
+        if (response.ok) {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, clone));
         }
+        return response;
+      }).catch(() => {
         return new Response('', { status: 503, statusText: 'Service Unavailable' });
       });
     })

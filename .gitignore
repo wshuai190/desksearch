@@ -7,9 +7,12 @@ dist/
 build/
 .pytest_cache/
 *.so
+*.whl
+*.tar.gz
 
 # Node
 node_modules/
+src/ui/dist/
 
 # IDE
 .idea/

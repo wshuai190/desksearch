@@ -125,7 +125,6 @@ class DeskSearch:
             _warm_search_engine(
                 self._engine,
                 self._get_store(),
-                self._get_embedder(),
                 self._config,
             )
         return self._engine

@@ -219,23 +219,153 @@ class Embedder:
             )
             self._touch()
 
+    def _resolve_tier(self) -> str:
+        """Return the Starbucks tier name matching target layers/dim."""
+        for tier_name, (layers, dim) in STARBUCKS_TIERS.items():
+            if layers == self._target_layers and dim == self._target_dim:
+                return tier_name
+        return "middle"
+
+    def _auto_export_starbucks_onnx(self, tier: str, onnx_path: Path, tokenizer_path: Path) -> None:
+        """Auto-export the Starbucks ONNX model for the given tier.
+
+        Requires torch + transformers. Downloads the model once, saves a
+        6-layer version locally, then exports the needed tier to ONNX.
+
+        Runs the actual export in a subprocess to avoid torch/FAISS C++
+        destructor conflicts that cause SIGSEGV on macOS.
+        """
+        import subprocess
+        import sys
+
+        layers, dim = STARBUCKS_TIERS[tier]
+        logger.info(
+            "Auto-exporting Starbucks ONNX model for tier '%s' (%d layers, %dd)...",
+            tier, layers, dim,
+        )
+
+        # Ensure the 6-layer base model is downloaded (safe — no torch needed)
+        local_model = self._ensure_local_model()
+
+        _STARBUCKS_ONNX_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Run ONNX export in an isolated subprocess to prevent torch/FAISS
+        # C++ destructor conflicts that cause SIGSEGV at exit on macOS.
+        export_script = f'''
+import sys, os, logging
+logging.basicConfig(level=logging.INFO)
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
+import torch
+import torch.nn as nn
+from transformers import AutoModel, AutoConfig, AutoTokenizer
+
+local_model = "{local_model}"
+onnx_path = "{onnx_path}"
+tokenizer_path = "{tokenizer_path}"
+layers = {layers}
+dim = {dim}
+
+# Load model with truncated layers
+config = AutoConfig.from_pretrained(local_model)
+config.num_hidden_layers = layers
+
+# Suppress transformers warnings about unused weights
+import logging as _logging
+_tf_logger = _logging.getLogger("transformers.modeling_utils")
+_tf_logger.setLevel(_logging.ERROR)
+
+model = AutoModel.from_pretrained(local_model, config=config).eval()
+
+class TierModel(nn.Module):
+    def __init__(self, bert, d):
+        super().__init__()
+        self.bert = bert
+        self.d = d
+    def forward(self, input_ids, attention_mask):
+        out = self.bert(input_ids=input_ids, attention_mask=attention_mask)
+        return out.last_hidden_state[:, :, :self.d]
+
+wrapped = TierModel(model, dim).eval()
+
+dummy_ids = torch.ones(1, 32, dtype=torch.long)
+dummy_mask = torch.ones(1, 32, dtype=torch.long)
+torch.onnx.export(
+    wrapped, (dummy_ids, dummy_mask), onnx_path,
+    input_names=["input_ids", "attention_mask"],
+    output_names=["last_hidden_state"],
+    dynamic_axes={{
+        "input_ids": {{0: "batch_size", 1: "sequence_length"}},
+        "attention_mask": {{0: "batch_size", 1: "sequence_length"}},
+        "last_hidden_state": {{0: "batch_size", 1: "sequence_length"}},
+    }},
+    opset_version=14, do_constant_folding=True,
+)
+print("ONNX_EXPORT_OK")
+
+# INT8 quantization
+try:
+    from onnxruntime.quantization import quantize_dynamic, QuantType
+    from pathlib import Path
+    fp32 = onnx_path + ".fp32"
+    os.rename(onnx_path, fp32)
+    quantize_dynamic(fp32, onnx_path, weight_type=QuantType.QInt8)
+    os.unlink(fp32)
+    print("INT8_QUANTIZE_OK")
+except Exception as e:
+    print(f"INT8_SKIP: {{e}}")
+
+# Save tokenizer
+if not os.path.exists(tokenizer_path):
+    tokenizer = AutoTokenizer.from_pretrained(local_model)
+    tokenizer.save_pretrained("{_STARBUCKS_ONNX_DIR}")
+    print("TOKENIZER_OK")
+
+print("EXPORT_DONE")
+'''
+        result = subprocess.run(
+            [sys.executable, "-c", export_script],
+            capture_output=True, text=True, timeout=300,
+        )
+
+        if "EXPORT_DONE" not in result.stdout:
+            # Log full output for debugging
+            if result.stdout:
+                logger.info("Export stdout: %s", result.stdout.strip())
+            if result.stderr:
+                # Filter out expected warnings
+                stderr_lines = [
+                    l for l in result.stderr.splitlines()
+                    if "IS expected" not in l and "IS NOT expected" not in l
+                    and "not used when initializing" not in l
+                ]
+                if stderr_lines:
+                    logger.warning("Export stderr: %s", "\n".join(stderr_lines[:10]))
+            raise RuntimeError(
+                f"ONNX export subprocess failed (exit={result.returncode}). "
+                f"Check logs above for details."
+            )
+
+        if not onnx_path.exists():
+            raise FileNotFoundError(f"ONNX export completed but file not found: {onnx_path}")
+
+        size_mb = onnx_path.stat().st_size / (1024 * 1024)
+        logger.info("Exported %s (%.1f MB)", onnx_path.name, size_mb)
+
     def _load_starbucks_onnx(self) -> None:
         """Load Starbucks model via pre-exported ONNX (INT8) for maximum speed.
 
         These models were exported with CLS pooling and dimension truncation
         baked in, so the output is already the right shape.  INT8 quantisation
         gives ~6x speedup over PyTorch float32 on Apple M-series CPUs.
+
+        If the ONNX file does not exist and torch+transformers are available,
+        auto-exports it on first run.
         """
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
-        # Determine which ONNX file to use based on the Starbucks tier
-        from desksearch.config import Config
-        tier = "middle"  # default
-        for tier_name, (layers, dim) in STARBUCKS_TIERS.items():
-            if layers == self._target_layers and dim == self._target_dim:
-                tier = tier_name
-                break
+        tier = self._resolve_tier()
 
         onnx_file = _STARBUCKS_ONNX_FILES.get(tier)
         if onnx_file is None:
@@ -244,8 +374,19 @@ class Embedder:
         onnx_path = _STARBUCKS_ONNX_DIR / onnx_file
         tokenizer_path = _STARBUCKS_ONNX_DIR / "tokenizer.json"
 
+        # Auto-export if ONNX file missing and torch is available
+        if not onnx_path.exists() or not tokenizer_path.exists():
+            if _transformers_available():
+                self._auto_export_starbucks_onnx(tier, onnx_path, tokenizer_path)
+            else:
+                raise FileNotFoundError(
+                    f"ONNX model not found: {onnx_path}\n"
+                    f"Install torch + transformers to auto-export, or run: "
+                    f"python -m desksearch.scripts.export_onnx"
+                )
+
         if not onnx_path.exists():
-            raise FileNotFoundError(f"ONNX model not found: {onnx_path}")
+            raise FileNotFoundError(f"ONNX model not found after export attempt: {onnx_path}")
         if not tokenizer_path.exists():
             raise FileNotFoundError(f"Tokenizer not found: {tokenizer_path}")
 

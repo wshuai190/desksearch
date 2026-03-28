@@ -147,8 +147,9 @@ class DenseIndex:
                 self._doc_id_to_int = {k: int(v) for k, v in mapping["doc_to_int"].items()}
                 self._int_to_doc_id = {int(k): v for k, v in mapping["int_to_doc"].items()}
                 self._next_id = mapping.get("next_id", len(self._doc_id_to_int))
-                # Restore soft-deleted set (int ids present in FAISS but not in mapping)
-                self._soft_deleted = set()
+                # Restore soft-deleted set: int ids present in FAISS but not in mapping
+                known_int_ids = set(self._int_to_doc_id.keys())
+                self._soft_deleted = {i for i in range(index.ntotal) if i not in known_int_ids}
 
                 # Check dimension mismatch — if the saved index has a
                 # different dimension than the current config, discard it.
@@ -550,13 +551,12 @@ class DenseIndex:
     # ------------------------------------------------------------------
 
     def _reconstruct_all_locked(self) -> Optional[np.ndarray]:
-        """Reconstruct all vectors (including soft-deleted) — lock must be held."""
-        n = self._index.ntotal
-        if n == 0:
+        """Reconstruct all live vectors from the index — lock must be held."""
+        int_ids = sorted(self._int_to_doc_id.keys())
+        if not int_ids:
             return None
         try:
-            vectors = np.zeros((n, self._dimension), dtype=np.float32)
-            int_ids = sorted(self._int_to_doc_id.keys())
+            vectors = np.zeros((len(int_ids), self._dimension), dtype=np.float32)
             for i, int_id in enumerate(int_ids):
                 vectors[i] = self._index.reconstruct(int_id)
             return vectors

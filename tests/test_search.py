@@ -311,7 +311,7 @@ class TestHybridSearchEngine:
         assert len(results) >= 1
         assert all(isinstance(r, SearchResult) for r in results)
 
-    @pytest.mark.asyncio
+    @pytest.mark.anyio
     async def test_async_search(self, engine: HybridSearchEngine) -> None:
         engine.add_document("doc1", "machine learning algorithms", self._random_emb())
         engine.add_document("doc2", "web development frameworks", self._random_emb())

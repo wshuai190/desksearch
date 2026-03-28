@@ -327,7 +327,7 @@ async def search(
     # --- Build final API results ---
     # --- Load doc embeddings for related-doc feature (lazy, once) ---
     if rich and not _doc_emb_loaded:
-        loop.run_in_executor(None, _ensure_doc_embeddings)
+        await loop.run_in_executor(None, _ensure_doc_embeddings)
 
     # --- NL answer extraction ---
     from desksearch.core.nlsearch import is_question, extract_answer

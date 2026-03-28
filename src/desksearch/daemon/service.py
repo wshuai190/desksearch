@@ -441,7 +441,7 @@ class BackgroundService:
 
         # Warm search engine with previously indexed data
         from desksearch.api.server import _warm_search_engine
-        _warm_search_engine(self._engine, self._store, self._embedder, self.config)
+        _warm_search_engine(self._engine, self._store, self.config)
 
     # ------------------------------------------------------------------
     # Lifecycle

@@ -477,7 +477,7 @@ class HybridSearchEngine:
         loop = asyncio.get_running_loop()
 
         results = await loop.run_in_executor(
-            None,
+            _SEARCH_EXECUTOR,
             partial(
                 self._search_sync_inner,
                 query_norm, query_embedding, top_k, fusion_alpha, max_snippets, boosts,
