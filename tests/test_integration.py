@@ -3,10 +3,12 @@
 End-to-end tests that exercise indexing, search, and incremental updates
 working together as a complete system.
 """
-import numpy as np
-import pytest
+import zlib
 from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+import numpy as np
+import pytest
 
 from desksearch.config import Config
 from desksearch.core.search import HybridSearchEngine, SearchResult
@@ -20,10 +22,22 @@ def _deterministic_embedder(keyword_vectors: dict[str, np.ndarray]):
     """Create a mock Embedder that returns deterministic vectors.
 
     For each text, if it contains a keyword from keyword_vectors, use that
-    vector (with small noise). Otherwise return a random vector.
+    vector (with small noise). Otherwise return a pseudo-random *unit-norm*
+    vector derived from the text itself.
+
+    Real embedders (Starbucks / MiniLM) emit unit-norm vectors, and the dense
+    index ranks by inner product on purpose — so the fallback must not have a
+    larger magnitude than the aligned vectors, or it would outrank them on
+    length alone. An unseeded ``np.random.randn`` also made these assertions
+    flaky; the seed is derived from the text so runs are reproducible.
     """
     mock = MagicMock()
     mock.dimension = DIM
+
+    def _fallback_vector(text: str) -> np.ndarray:
+        seed = zlib.crc32(text.encode("utf-8"))
+        vec = np.random.default_rng(seed).standard_normal(DIM).astype(np.float32)
+        return vec / np.linalg.norm(vec)
 
     def _embed(texts, batch_size=64):
         vecs = []
@@ -31,12 +45,12 @@ def _deterministic_embedder(keyword_vectors: dict[str, np.ndarray]):
             matched = False
             for keyword, vec in keyword_vectors.items():
                 if keyword.lower() in text.lower():
-                    noise = np.random.randn(DIM).astype(np.float32) * 0.01
+                    noise = np.random.default_rng(0).standard_normal(DIM).astype(np.float32) * 0.01
                     vecs.append(vec + noise)
                     matched = True
                     break
             if not matched:
-                vecs.append(np.random.randn(DIM).astype(np.float32))
+                vecs.append(_fallback_vector(text))
         return np.array(vecs, dtype=np.float32)
 
     mock.embed = _embed

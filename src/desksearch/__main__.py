@@ -1093,9 +1093,9 @@ def benchmark(
     import shutil
     import tempfile
     import tracemalloc
-    import resource
 
     from desksearch.indexer.pipeline import IndexingPipeline, StatusType
+    from desksearch.utils.memory import current_rss_mb
 
     config = Config.load()
 
@@ -1151,7 +1151,7 @@ def benchmark(
     bench_config = config.model_copy(update={"data_dir": bench_data})
 
     tracemalloc.start()
-    rss_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    rss_before = current_rss_mb()  # MB, cross-platform
 
     pipeline = IndexingPipeline(config=bench_config)
     t_start = time.perf_counter()
@@ -1179,7 +1179,7 @@ def benchmark(
         pipeline.close()
 
     elapsed = time.perf_counter() - t_start
-    rss_after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    rss_after = current_rss_mb()  # MB, cross-platform
     _, peak_traced = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
@@ -1193,12 +1193,7 @@ def benchmark(
     mb_sec = total_mb / elapsed if elapsed > 0 else 0
     peak_mb = peak_traced / (1024 * 1024)
 
-    import platform
-    rss_delta = rss_after - rss_before
-    if platform.system() == "Darwin":
-        rss_delta_mb = rss_delta / (1024 * 1024)
-    else:
-        rss_delta_mb = rss_delta * 4 / 1024
+    rss_delta_mb = rss_after - rss_before  # both already in MB
 
     cache_stats = pipeline.embedder.chunk_cache_stats
 

@@ -3,10 +3,24 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import Optional
 import json
+import logging
 import os
 
+logger = logging.getLogger(__name__)
 
-DEFAULT_DATA_DIR = Path(os.environ.get("DESKSEARCH_DATA_DIR", str(Path.home() / ".desksearch")))
+
+def default_data_dir() -> Path:
+    """Resolve the data directory, honouring ``DESKSEARCH_DATA_DIR`` at call time.
+
+    Reading the environment lazily (instead of once at import) keeps the
+    override working for embedders, Click's test runner and any launcher that
+    sets the variable after ``desksearch`` has been imported.
+    """
+    return Path(os.environ.get("DESKSEARCH_DATA_DIR", str(Path.home() / ".desksearch")))
+
+
+# Retained for backwards compatibility; prefer default_data_dir() for new code.
+DEFAULT_DATA_DIR = default_data_dir()
 DEFAULT_INDEX_PATHS = [
     Path.home() / "Documents",
     Path.home() / "Desktop",
@@ -30,7 +44,7 @@ DEFAULT_PORT = 3777
 class Config(BaseModel):
     """DeskSearch configuration."""
 
-    data_dir: Path = Field(default=DEFAULT_DATA_DIR, description="Directory to store index and metadata")
+    data_dir: Path = Field(default_factory=default_data_dir, description="Directory to store index and metadata")
     index_paths: list[Path] = Field(default_factory=lambda: list(DEFAULT_INDEX_PATHS), description="Directories to index")
     embedding_model: str = Field(default=DEFAULT_EMBEDDING_MODEL, description="Embedding model (default: Starbucks 2D Matryoshka)")
     chunk_size: int = Field(default=DEFAULT_CHUNK_SIZE, description="Characters per chunk")
@@ -123,19 +137,44 @@ class Config(BaseModel):
 
     @classmethod
     def load(cls, path: Optional[Path] = None) -> "Config":
-        """Load config from file, falling back to defaults."""
-        config_path = path or (DEFAULT_DATA_DIR / "config.json")
-        if config_path.exists():
-            with open(config_path) as f:
+        """Load config from file, falling back to defaults.
+
+        The file is read as ``utf-8-sig`` so a UTF-8 BOM is tolerated —
+        Windows PowerShell 5.1 (``Set-Content -Encoding UTF8``), Notepad and
+        several editors add one, and ``json.load`` would otherwise raise
+        "Unexpected UTF-8 BOM" and take the whole app down at startup.
+
+        A missing, unreadable or malformed file is not fatal either: the
+        defaults are used and a warning is logged.
+        """
+        config_path = path or (default_data_dir() / "config.json")
+        if not config_path.exists():
+            return cls()
+        try:
+            with open(config_path, encoding="utf-8-sig") as f:
                 return cls(**json.load(f))
-        return cls()
+        except Exception as exc:  # noqa: BLE001 — never block startup on config
+            logger.warning(
+                "Could not read config %s (%s: %s) — using defaults. "
+                "The file was left untouched.",
+                config_path,
+                type(exc).__name__,
+                exc,
+            )
+            return cls()
 
     def save(self, path: Optional[Path] = None) -> None:
-        """Save config to file."""
+        """Save config to file (UTF-8, no BOM, written atomically).
+
+        The encoding is explicit because ``open()`` otherwise uses the locale
+        encoding on Windows (e.g. cp936), which would corrupt non-ASCII paths.
+        """
         config_path = path or (self.data_dir / "config.json")
         config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w") as f:
+        tmp_path = config_path.with_suffix(config_path.suffix + ".tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self.model_dump(mode="json"), f, indent=2, default=str)
+        os.replace(tmp_path, config_path)
 
     def validate(self) -> list[str]:
         """Validate configuration and return a list of warning/error strings.
@@ -171,7 +210,14 @@ class Config(BaseModel):
         else:
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    if os.name == "nt":
+                        # Windows: SO_REUSEADDR lets us bind a port another
+                        # process already owns, which would silently disable
+                        # this check. SO_EXCLUSIVEADDRUSE restores the
+                        # Unix-like "is the port actually free?" semantics.
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                    else:
+                        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                     s.bind((self.host, self.port))
             except OSError as exc:
                 issues.append(

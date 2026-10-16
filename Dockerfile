@@ -69,9 +69,9 @@ ENV DESKSEARCH_DATA_DIR=/data
 ENV DESKSEARCH_HOST=0.0.0.0
 ENV DESKSEARCH_PORT=3777
 
-# Health check — curl the search API
+# Health check — the health route is /api/health (there is no /api/v1/health)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:$DESKSEARCH_PORT/api/v1/health')" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:$DESKSEARCH_PORT/api/health')" || exit 1
 
 VOLUME ["/data"]
 EXPOSE 3777

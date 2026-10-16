@@ -27,6 +27,12 @@ module.exports = {
 
   extraResources: [
     {
+      // PyInstaller backend binary (build it first: pyinstaller desksearch.spec)
+      from: path.resolve(__dirname, '..', 'dist', 'desksearch-backend'),
+      to: 'backend',
+      filter: ['**/*'],
+    },
+    {
       from: path.resolve(__dirname, '..', 'src', 'ui', 'dist'),
       to: 'ui',
       filter: ['**/*'],

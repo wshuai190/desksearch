@@ -1,5 +1,6 @@
 """First-run onboarding wizard for DeskSearch."""
 from pathlib import Path
+import os
 
 from rich.console import Console
 from rich.panel import Panel
@@ -20,9 +21,20 @@ _DEV_FOLDERS = ["Projects", "Code", "code", "src", "repos", "dev", "workspace"]
 _NOTES_FOLDERS = ["Notes", "Obsidian", "obsidian", "notes", "Notion", "Logseq", "logseq"]
 
 
+def _config_dir() -> Path:
+    """Directory holding ``config.json``.
+
+    An explicit ``DESKSEARCH_DATA_DIR`` wins (that is how the Docker image and
+    the test suite isolate their state); otherwise the module-level default is
+    used, which callers may override by patching it.
+    """
+    override = os.environ.get("DESKSEARCH_DATA_DIR")
+    return Path(override) if override else DEFAULT_DATA_DIR
+
+
 def is_first_run() -> bool:
     """Check if this is the first time DeskSearch is being run."""
-    config_path = DEFAULT_DATA_DIR / "config.json"
+    config_path = _config_dir() / "config.json"
     return not config_path.exists()
 
 
@@ -150,11 +162,21 @@ def run_onboarding_wizard() -> Config:
     return config
 
 
-def run_initial_index(config: Config) -> None:
-    """Run initial indexing with a nice progress display."""
+def run_initial_index(config: Config, paths: list[Path] | None = None) -> None:
+    """Run initial indexing with a nice progress display.
+
+    Args:
+        config: Configuration providing the index/data locations.
+        paths: Folders to scan. Defaults to every configured
+            ``config.index_paths`` entry; pass an explicit list to index only
+            part of the corpus (e.g. a single newly added folder) instead of
+            re-scanning the whole index.
+    """
     import logging
     from desksearch.core.search import HybridSearchEngine
     from desksearch.indexer.pipeline import IndexingPipeline, StatusType
+
+    scan_paths = list(paths) if paths is not None else list(config.index_paths)
 
     # Suppress noisy log messages during CLI indexing (parser warnings, etc.)
     logging.getLogger("desksearch").setLevel(logging.WARNING)
@@ -182,7 +204,7 @@ def run_initial_index(config: Config) -> None:
             discovered = 0
             files_parsed = 0
 
-            for path in config.index_paths:
+            for path in scan_paths:
                 if not path.is_dir():
                     continue
                 progress.update(task, description=f"[cyan]Scanning {path.name}/...")
@@ -259,8 +281,9 @@ def add_folder(folder_path: str) -> None:
     config.save()
     console.print(f"[green]Added:[/green] {path}")
 
-    # Index the new folder
-    run_initial_index(Config.load())
+    # Index the new folder only — re-scanning every configured folder here
+    # would turn "add one folder" into a full corpus re-index.
+    run_initial_index(Config.load(), paths=[path])
 
 
 def remove_folder(folder_path: str) -> None:

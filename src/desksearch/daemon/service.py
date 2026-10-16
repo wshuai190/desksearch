@@ -9,7 +9,6 @@ import json
 import logging
 import logging.handlers
 import os
-import resource
 import signal
 import sys
 import threading
@@ -54,19 +53,20 @@ def _setup_logging() -> None:
 
 
 def _get_rss_mb() -> float:
-    """Return current process RSS in megabytes."""
-    try:
-        ru = resource.getrusage(resource.RUSAGE_SELF)
-        # On macOS ru_maxrss is in bytes, on Linux it's in KB
-        if sys.platform == "darwin":
-            return ru.ru_maxrss / (1024 * 1024)
-        return ru.ru_maxrss / 1024
-    except Exception:
-        return 0.0
+    """Return current process RSS in megabytes (works on Windows too)."""
+    from desksearch.utils.memory import current_rss_mb
+
+    return current_rss_mb()
 
 
 def _get_rss_mb_precise() -> float:
-    """Return current RSS from /proc or ps (more accurate than ru_maxrss)."""
+    """Return current RSS from psutil//proc/ps (more accurate than ru_maxrss)."""
+    from desksearch.utils.memory import rss_mb
+
+    mb = rss_mb()  # psutil — available on Windows, macOS and Linux
+    if mb is not None:
+        return mb
+
     try:
         if sys.platform == "darwin":
             import subprocess
@@ -140,21 +140,32 @@ class BackgroundService:
     # ------------------------------------------------------------------
 
     def _apply_resource_limits(self) -> None:
-        """Apply process-level resource limits."""
-        # Set nice level to lower priority
-        try:
-            os.nice(DEFAULT_NICE_LEVEL)
-            logger.info("Set process nice level to %d", DEFAULT_NICE_LEVEL)
-        except OSError as e:
-            logger.warning("Could not set nice level: %s", e)
+        """Apply process-level resource limits.
+
+        ``os.nice`` and the ``resource`` module are POSIX-only; on Windows
+        both are skipped so the daemon still starts.
+        """
+        # Set nice level to lower priority (POSIX only)
+        if hasattr(os, "nice"):
+            try:
+                os.nice(DEFAULT_NICE_LEVEL)
+                logger.info("Set process nice level to %d", DEFAULT_NICE_LEVEL)
+            except OSError as e:
+                logger.warning("Could not set nice level: %s", e)
+        else:
+            logger.debug("os.nice() unavailable on this platform — skipping")
 
         # On macOS/Linux: set soft memory limit via setrlimit
         try:
+            import resource  # POSIX-only
+
             soft_bytes = self.max_memory_mb * 1024 * 1024
             # Set the address space limit (soft only, leave hard unlimited)
             _soft, hard = resource.getrlimit(resource.RLIMIT_AS)
             resource.setrlimit(resource.RLIMIT_AS, (soft_bytes, hard))
             logger.info("Set RLIMIT_AS soft limit to %dMB", self.max_memory_mb)
+        except ImportError:
+            logger.debug("resource module unavailable — skipping RLIMIT_AS")
         except (ValueError, OSError) as e:
             logger.warning("Could not set RLIMIT_AS: %s", e)
 

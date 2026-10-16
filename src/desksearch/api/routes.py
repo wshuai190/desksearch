@@ -1654,29 +1654,13 @@ async def _broadcast_progress(data: dict) -> None:
 async def memory_info() -> dict:
     """Return process memory and resource usage information."""
     import os
-    import resource
-    import sys
     import threading
 
-    # Process RSS
-    try:
-        if sys.platform == "darwin":
-            import subprocess
-            out = subprocess.check_output(
-                ["ps", "-o", "rss=", "-p", str(os.getpid())],
-                text=True,
-            ).strip()
-            rss_mb = int(out) / 1024
-        else:
-            with open(f"/proc/{os.getpid()}/status") as f:
-                rss_mb = 0.0
-                for line in f:
-                    if line.startswith("VmRSS:"):
-                        rss_mb = int(line.split()[1]) / 1024
-                        break
-    except Exception:
-        ru = resource.getrusage(resource.RUSAGE_SELF)
-        rss_mb = ru.ru_maxrss / (1024 * 1024) if sys.platform == "darwin" else ru.ru_maxrss / 1024
+    from desksearch.utils.memory import current_rss_mb
+
+    # Process RSS — cross-platform (psutil -> /proc -> resource), so this
+    # endpoint works on Windows too instead of raising ModuleNotFoundError.
+    rss_mb = current_rss_mb()
 
     # Model status
     model_loaded = False

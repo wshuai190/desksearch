@@ -386,8 +386,9 @@ print("EXPORT_DONE")
             else:
                 raise FileNotFoundError(
                     f"ONNX model not found: {onnx_path}\n"
-                    f"Install torch + transformers to auto-export, or run: "
-                    f"python -m desksearch.scripts.export_onnx"
+                    f"Install the full extra to auto-export it on next start:\n"
+                    f'  pip install "desksearch[full]"   # torch + transformers + onnx\n'
+                    f"Falling back to the MiniLM ONNX model otherwise."
                 )
 
         if not onnx_path.exists():

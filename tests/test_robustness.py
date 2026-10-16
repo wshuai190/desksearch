@@ -748,9 +748,63 @@ async def test_health_endpoint_search_mode(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 7. Graceful degradation
+# 6b. Config file robustness (this broke a real desktop install: the app exited
+#     on startup and the Electron window never got a server to talk to)
 # ---------------------------------------------------------------------------
 
+
+class TestConfigFileRobustness:
+    def test_loads_config_with_utf8_bom(self, tmp_path: Path) -> None:
+        """Windows PowerShell 5.1 writes a BOM with `Set-Content -Encoding UTF8`.
+
+        json.load() raises "Unexpected UTF-8 BOM" on those files, which used to
+        abort the whole process at startup.
+        """
+        path = tmp_path / "config.json"
+        payload = {"port": 4123, "data_dir": str(tmp_path / "data")}
+        path.write_bytes(b"\xef\xbb\xbf" + json.dumps(payload).encode("utf-8"))
+
+        config = Config.load(path)
+        assert config.port == 4123
+
+    def test_malformed_config_falls_back_to_defaults(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.json"
+        path.write_text("{ this is not json", encoding="utf-8")
+
+        config = Config.load(path)
+        assert config.port == 3777  # default, no exception
+        assert path.read_text(encoding="utf-8") == "{ this is not json"  # left alone
+
+    def test_empty_config_file_falls_back(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.json"
+        path.write_text("", encoding="utf-8")
+        assert Config.load(path).port == 3777
+
+    def test_unknown_keys_are_ignored(self, tmp_path: Path) -> None:
+        """Forward-compat: a config written by a newer/older release still loads."""
+        path = tmp_path / "config.json"
+        path.write_text(json.dumps({"port": 4000, "nonsense": True}), encoding="utf-8")
+        assert Config.load(path).port == 4000
+
+    def test_missing_config_uses_defaults(self, tmp_path: Path) -> None:
+        assert Config.load(tmp_path / "nope.json").port == 3777
+
+    def test_save_is_utf8_without_bom_and_atomic(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.json"
+        cfg = Config(data_dir=tmp_path / "data", port=4321, index_paths=[tmp_path / "文档"])
+        cfg.save(path)
+
+        raw = path.read_bytes()
+        assert not raw.startswith(b"\xef\xbb\xbf")
+        # Non-ASCII paths survive a round trip (explicit UTF-8, not the locale
+        # encoding — cp936 on Chinese Windows corrupts them).
+        assert Config.load(path).index_paths == [tmp_path / "文档"]
+        assert not list(tmp_path.glob("*.tmp"))  # no leftover temp file
+
+
+# ---------------------------------------------------------------------------
+# 7. Graceful degradation
+# ---------------------------------------------------------------------------
 
 class TestGracefulDegradation:
     """Verify search falls back gracefully when one backend is unavailable."""
