@@ -1,15 +1,20 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 import type { AnalyticsSummary } from '../types';
 
-function BarChart({ data }: { data: { date: string; count: number }[] }) {
+function BarChart({ data, formatDate }: {
+  data: { date: string; count: number }[];
+  formatDate: (value: string | number | Date) => string;
+}) {
+  const { t } = useI18n();
   if (!data || data.length === 0) return null;
   const max = Math.max(...data.map(d => d.count), 1);
 
   return (
     <div className="flex items-end gap-1 h-20">
       {data.map((d) => (
-        <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group" title={`${d.date}: ${d.count} searches`}>
+        <div key={d.date} className="flex-1 flex flex-col items-center gap-1 group" title={t('panels.analytics.barTooltip', { date: formatDate(d.date), count: d.count })}>
           <div
             className="w-full bg-accent-blue/20 group-hover:bg-accent-blue/50 rounded-t transition-colors"
             style={{ height: `${(d.count / max) * 100}%`, minHeight: d.count > 0 ? '4px' : '0' }}
@@ -36,6 +41,7 @@ function StatCard({ icon, label, value, sub }: {
 }
 
 export default function AnalyticsDashboard() {
+  const { t, formatNumber, formatDate } = useI18n();
   const [data, setData] = useState<AnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState(30);
@@ -55,10 +61,10 @@ export default function AnalyticsDashboard() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            📊 Search Insights
+            {t('panels.analytics.title')}
           </h2>
           <p className="text-sm text-gray-400 mt-0.5">
-            Understand how you use DeskSearch
+            {t('panels.analytics.subtitle')}
           </p>
         </div>
         <select
@@ -66,9 +72,9 @@ export default function AnalyticsDashboard() {
           onChange={e => setDays(Number(e.target.value))}
           className="text-sm border border-gray-200 dark:border-dark-border rounded-lg px-3 py-1.5 bg-white dark:bg-dark-surface text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-accent-blue/50"
         >
-          <option value={7}>Last 7 days</option>
-          <option value={30}>Last 30 days</option>
-          <option value={90}>Last 90 days</option>
+          <option value={7}>{t('panels.analytics.range7')}</option>
+          <option value={30}>{t('panels.analytics.range30')}</option>
+          <option value={90}>{t('panels.analytics.range90')}</option>
         </select>
       </div>
 
@@ -87,7 +93,7 @@ export default function AnalyticsDashboard() {
       {!loading && !data && (
         <div className="text-center py-16">
           <div className="text-4xl mb-3">📭</div>
-          <p className="text-gray-500 dark:text-gray-400">No analytics data yet. Start searching!</p>
+          <p className="text-gray-500 dark:text-gray-400">{t('panels.analytics.emptyTitle')}</p>
         </div>
       )}
 
@@ -97,15 +103,15 @@ export default function AnalyticsDashboard() {
           <div className="grid grid-cols-2 gap-4">
             <StatCard
               icon="🔍"
-              label="Total Searches"
-              value={data.total_searches.toLocaleString()}
-              sub={`in the last ${days} days`}
+              label={t('panels.analytics.totalSearches')}
+              value={formatNumber(data.total_searches)}
+              sub={t('panels.analytics.inLastDays', { count: days })}
             />
             <StatCard
               icon="📂"
-              label="Files Accessed"
-              value={data.total_clicks.toLocaleString()}
-              sub="via search results"
+              label={t('panels.analytics.filesAccessed')}
+              value={formatNumber(data.total_clicks)}
+              sub={t('panels.analytics.viaSearchResults')}
             />
           </div>
 
@@ -113,15 +119,16 @@ export default function AnalyticsDashboard() {
           {data.search_over_time.length > 1 && (
             <div className="bg-white dark:bg-dark-surface border border-gray-100 dark:border-dark-border rounded-xl p-5">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
-                Search Activity
+                {t('panels.analytics.searchActivity')}
               </h3>
-              <BarChart data={data.search_over_time} />
+              <BarChart data={data.search_over_time} formatDate={formatDate} />
               <div className="flex justify-between mt-1">
                 <span className="text-[10px] text-gray-400">
-                  {data.search_over_time[0]?.date}
+                  {data.search_over_time[0]?.date && formatDate(data.search_over_time[0].date)}
                 </span>
                 <span className="text-[10px] text-gray-400">
-                  {data.search_over_time[data.search_over_time.length - 1]?.date}
+                  {data.search_over_time[data.search_over_time.length - 1]?.date &&
+                    formatDate(data.search_over_time[data.search_over_time.length - 1].date)}
                 </span>
               </div>
             </div>
@@ -131,7 +138,7 @@ export default function AnalyticsDashboard() {
           {data.top_searches.length > 0 && (
             <div className="bg-white dark:bg-dark-surface border border-gray-100 dark:border-dark-border rounded-xl p-5">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
-                🔥 Your Most Searched Topics
+                {t('panels.analytics.topSearches')}
               </h3>
               <div className="space-y-2.5">
                 {data.top_searches.map((s, i) => {
@@ -169,7 +176,7 @@ export default function AnalyticsDashboard() {
           {data.top_files.length > 0 && (
             <div className="bg-white dark:bg-dark-surface border border-gray-100 dark:border-dark-border rounded-xl p-5">
               <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">
-                📂 Most Accessed Files
+                {t('panels.analytics.mostAccessedFiles')}
               </h3>
               <div className="space-y-2">
                 {data.top_files.map((f) => (
@@ -204,8 +211,8 @@ export default function AnalyticsDashboard() {
           {data.total_searches === 0 && (
             <div className="text-center py-12 bg-white dark:bg-dark-surface border border-gray-100 dark:border-dark-border rounded-xl">
               <div className="text-4xl mb-3">🔍</div>
-              <p className="text-gray-600 dark:text-gray-400 font-medium">No searches yet</p>
-              <p className="text-sm text-gray-400 mt-1">Your search history will appear here</p>
+              <p className="text-gray-600 dark:text-gray-400 font-medium">{t('panels.analytics.noSearchesYet')}</p>
+              <p className="text-sm text-gray-400 mt-1">{t('panels.analytics.searchHistoryHint')}</p>
             </div>
           )}
         </div>

@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:i18n": "esbuild scripts/check-i18n.ts --bundle --platform=node --format=cjs --outfile=.tmp-check-i18n.cjs --log-level=error && node .tmp-check-i18n.cjs && node -e \"require('fs').rmSync('.tmp-check-i18n.cjs',{force:true})\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "qrcode": "^1.5.4",

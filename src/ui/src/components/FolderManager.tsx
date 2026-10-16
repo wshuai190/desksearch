@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n, type TranslateParams } from '../i18n';
 import type { FolderInfo } from '../types';
 
-function timeAgo(dateStr: string): string {
+/** Signature of the i18n `t` function — lets helpers stay outside components. */
+type TranslateFn = (key: string, params?: TranslateParams) => string;
+
+function timeAgo(dateStr: string, t: TranslateFn): string {
   const d = new Date(dateStr);
   const diff = Date.now() - d.getTime();
   const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  if (mins < 1) return t('common.justNow');
+  if (mins < 60) return t('settings.folders.minutesAgo', { count: mins });
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
-  return `${Math.floor(hrs / 24)} day${Math.floor(hrs / 24) === 1 ? '' : 's'} ago`;
+  if (hrs < 24) return t('settings.folders.hoursAgo', { count: hrs });
+  return t('settings.folders.daysAgo', { count: Math.floor(hrs / 24) });
 }
 
 // ── Folder browser modal ─────────────────────────────────────────────────────
@@ -18,6 +22,7 @@ interface DirEntry { name: string; path: string; }
 interface BrowseResult { current: string; parent: string | null; directories: DirEntry[]; }
 
 function FolderBrowser({ onSelect, onClose }: { onSelect: (path: string) => void; onClose: () => void }) {
+  const { t } = useI18n();
   const [browsePath, setBrowsePath] = useState('~');
   const [browseResult, setBrowseResult] = useState<BrowseResult | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -48,7 +53,7 @@ function FolderBrowser({ onSelect, onClose }: { onSelect: (path: string) => void
       >
         <div className="px-5 py-4 border-b border-gray-200 dark:border-dark-border flex items-center justify-between">
           <div>
-            <h3 className="text-base font-semibold text-gray-900 dark:text-white">Choose a Folder</h3>
+            <h3 className="text-base font-semibold text-gray-900 dark:text-white">{t('settings.folders.browser.title')}</h3>
             <p className="text-xs text-gray-400 mt-0.5 font-mono truncate max-w-[280px]">{browsePath}</p>
           </div>
           <button
@@ -69,13 +74,13 @@ function FolderBrowser({ onSelect, onClose }: { onSelect: (path: string) => void
             >
               <span className="text-lg">📁</span>
               <span className="font-mono text-xs">..</span>
-              <span className="text-gray-400">Go up</span>
+              <span className="text-gray-400">{t('settings.folders.browser.goUp')}</span>
             </button>
           )}
           {browseLoading ? (
-            <div className="px-5 py-10 text-center text-gray-400 text-sm">Loading…</div>
+            <div className="px-5 py-10 text-center text-gray-400 text-sm">{t('common.loading')}</div>
           ) : browseResult?.directories.length === 0 ? (
-            <div className="px-5 py-10 text-center text-gray-400 text-sm">No subfolders here</div>
+            <div className="px-5 py-10 text-center text-gray-400 text-sm">{t('settings.folders.browser.empty')}</div>
           ) : (
             browseResult?.directories.map((dir) => (
               <button
@@ -97,13 +102,13 @@ function FolderBrowser({ onSelect, onClose }: { onSelect: (path: string) => void
               onClick={onClose}
               className="tap-sm px-4 py-2 text-sm rounded-xl border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               onClick={() => { onSelect(browsePath); onClose(); }}
               className="tap-sm px-5 py-2 text-sm rounded-xl bg-accent-blue text-white hover:bg-accent-blue-hover transition-colors font-medium"
             >
-              Add This Folder
+              {t('settings.folders.browser.addThisFolder')}
             </button>
           </div>
         </div>
@@ -122,15 +127,16 @@ interface IndexProgress {
 }
 
 function FolderIndexingBar({ progress }: { progress: IndexProgress }) {
+  const { t, formatNumber } = useI18n();
   const filename = progress.file ? progress.file.split('/').pop() : null;
   const pct = progress.total > 0 ? Math.round((progress.current / progress.total) * 100) : null;
 
-  let description = 'Getting started…';
-  if (progress.status === 'discovery') description = 'Finding files to index…';
-  else if (progress.status === 'parsing' || progress.status === 'reading') description = filename ? `Reading "${filename}"` : 'Reading files…';
-  else if (progress.status === 'embedding') description = filename ? `Understanding "${filename}"` : 'Processing files…';
-  else if (progress.status === 'storing') description = 'Saving index…';
-  else if (filename) description = `Processing "${filename}"`;
+  let description = t('settings.folders.progress.start');
+  if (progress.status === 'discovery') description = t('settings.folders.progress.discovery');
+  else if (progress.status === 'parsing' || progress.status === 'reading') description = filename ? t('settings.folders.progress.readingFile', { filename }) : t('settings.folders.progress.reading');
+  else if (progress.status === 'embedding') description = filename ? t('settings.folders.progress.understandingFile', { filename }) : t('settings.folders.progress.processing');
+  else if (progress.status === 'storing') description = t('settings.folders.progress.storing');
+  else if (filename) description = t('settings.folders.progress.processingFile', { filename });
 
   return (
     <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/40 rounded-xl p-4 space-y-2">
@@ -143,7 +149,7 @@ function FolderIndexingBar({ progress }: { progress: IndexProgress }) {
         </div>
         {pct !== null && (
           <span className="text-xs text-amber-600 dark:text-amber-400 flex-shrink-0 ml-2 tabular-nums">
-            {progress.current} / {progress.total}
+            {formatNumber(progress.current)} / {formatNumber(progress.total)}
           </span>
         )}
       </div>
@@ -159,6 +165,7 @@ function FolderIndexingBar({ progress }: { progress: IndexProgress }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function FolderManager() {
+  const { t } = useI18n();
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [newPath, setNewPath] = useState('');
   const [loading, setLoading] = useState(true);
@@ -196,7 +203,7 @@ export default function FolderManager() {
           loadFolders();
         } else {
           if (data.current === 0 && data.total === 0 && data.status === 'discovery') {
-            setIndexProgress(prev => prev ? { ...prev, message: data.message || 'Scanning…' } : data);
+            setIndexProgress(prev => prev ? { ...prev, message: data.message || t('settings.folders.progress.scanning') } : data);
           } else {
             setIndexProgress(data);
           }
@@ -210,7 +217,7 @@ export default function FolderManager() {
       if (ws) ws.close();
       clearTimeout(reconnectTimer);
     };
-  }, [loadFolders]);
+  }, [loadFolders, t]);
 
   const addFolder = async (folderPath?: string) => {
     const pathToAdd = folderPath || newPath.trim();
@@ -225,13 +232,13 @@ export default function FolderManager() {
       });
       if (!res.ok) {
         const data = await res.json();
-        setError(data.detail || 'Couldn\'t add that folder — make sure the path exists.');
+        setError(data.detail || t('settings.folders.addFailed'));
         return;
       }
       setNewPath('');
       await loadFolders();
     } catch {
-      setError('Couldn\'t connect to DeskSearch. Is the app running?');
+      setError(t('settings.connectionError'));
     } finally {
       setActionLoading(null);
     }
@@ -261,7 +268,7 @@ export default function FolderManager() {
   };
 
   const clearFolderIndex = async (path: string) => {
-    if (!confirm(`This will remove the search index for:\n\n${path}\n\nThe folder stays in your list and can be re-indexed anytime.`)) return;
+    if (!confirm(t('settings.folders.confirmClearIndex', { path }))) return;
     setActionLoading(`clear-${path}`);
     try {
       await fetch(`${API_BASE_URL}/api/index/folder/${encodeURIComponent(path)}`, { method: 'DELETE' });
@@ -274,7 +281,7 @@ export default function FolderManager() {
   };
 
   const clearAllIndex = async () => {
-    if (!confirm('This will clear the entire search index and you\'ll need to re-index your folders.\n\nYour folder list will stay. Continue?')) return;
+    if (!confirm(t('settings.folders.confirmClearAll'))) return;
     setActionLoading('clear-all');
     try {
       await fetch(`${API_BASE_URL}/api/index/clear`, { method: 'DELETE' });
@@ -305,22 +312,22 @@ export default function FolderManager() {
     <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
       {/* Header */}
       <div>
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white">Your Search Folders</h2>
+        <h2 className="text-xl font-bold text-gray-900 dark:text-white">{t('settings.folders.title')}</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          DeskSearch will index files in these folders so you can search them.
+          {t('settings.folders.subtitle')}
         </p>
       </div>
 
       {/* Add folder */}
       <div className="bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl p-4 space-y-3">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Add a folder</h3>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t('settings.folders.addTitle')}</h3>
         <div className="flex flex-col sm:flex-row gap-2">
           <input
             type="text"
             value={newPath}
             onChange={(e) => setNewPath(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && addFolder()}
-            placeholder="Type a folder path, or click Browse…"
+            placeholder={t('settings.folders.pathPlaceholder')}
             className="flex-1 px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue/50 focus:border-accent-blue"
           />
           <div className="flex gap-2">
@@ -331,7 +338,7 @@ export default function FolderManager() {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
               </svg>
-              Browse
+              {t('settings.folders.browse')}
             </button>
             <button
               onClick={() => addFolder()}
@@ -339,9 +346,9 @@ export default function FolderManager() {
               className="tap-sm flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-5 py-2.5 text-sm rounded-xl bg-accent-blue text-white hover:bg-accent-blue-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-medium"
             >
               {actionLoading === 'add' ? (
-                <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Adding…</>
+                <><svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> {t('settings.folders.adding')}</>
               ) : (
-                <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg> Add Folder</>
+                <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg> {t('settings.folders.addButton')}</>
               )}
             </button>
           </div>
@@ -376,13 +383,12 @@ export default function FolderManager() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">No folders added yet</h3>
+          <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">{t('settings.folders.empty.title')}</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 max-w-xs">
-            Click <strong>Browse</strong> to pick a folder from your computer,
-            or type a path above and click <strong>Add Folder</strong>.
+            {t('settings.folders.empty.hint1')}<strong>{t('settings.folders.browse')}</strong>{t('settings.folders.empty.hint2')}<strong>{t('settings.folders.addButton')}</strong>{t('settings.folders.empty.hint3')}
           </p>
           <p className="text-sm text-gray-400 dark:text-gray-500 mt-3">
-            Good places to start: Documents, Desktop, Downloads
+            {t('settings.folders.empty.suggestions')}
           </p>
         </div>
       ) : (
@@ -408,20 +414,20 @@ export default function FolderManager() {
               <svg className={`w-3.5 h-3.5 transition-transform ${showAdvanced ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
-              {showAdvanced ? 'Hide advanced options' : 'Show advanced options'}
+              {showAdvanced ? t('settings.folders.advanced.hide') : t('settings.folders.advanced.show')}
             </button>
 
             {showAdvanced && (
               <div className="mt-3 p-4 bg-gray-50 dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl space-y-2 animate-slideDown">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                  These options are rarely needed. Use them only if your search results seem outdated or wrong.
+                  {t('settings.folders.advanced.hint')}
                 </p>
                 <button
                   onClick={clearAllIndex}
                   disabled={actionLoading === 'clear-all'}
                   className="tap-sm w-full text-left px-4 py-3 text-sm rounded-lg border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 transition-colors"
                 >
-                  {actionLoading === 'clear-all' ? 'Clearing…' : '🗑️  Clear all search data and start over'}
+                  {actionLoading === 'clear-all' ? t('settings.folders.clearing') : t('settings.folders.advanced.clearAll')}
                 </button>
               </div>
             )}
@@ -448,6 +454,7 @@ function FolderCard({
   onClearIndex: (path: string) => void;
   showAdvanced: boolean;
 }) {
+  const { t, formatNumber } = useI18n();
   const isWatching = folder.status === 'watching';
   const displayPath = folder.path.replace(/^\/Users\/[^/]+/, '~');
 
@@ -471,14 +478,12 @@ function FolderCard({
               {/* File count */}
               <span className="text-gray-500 dark:text-gray-400">
                 {folder.file_count > 0
-                  ? `${folder.file_count.toLocaleString()} file${folder.file_count === 1 ? '' : 's'} searchable`
-                  : 'No files indexed yet'}
+                  ? t('settings.folders.fileCount', { count: folder.file_count, n: formatNumber(folder.file_count) })
+                  : t('settings.folders.noFilesIndexed')}
               </span>
               {/* Last indexed */}
               {folder.last_indexed && (
-                <span className="text-gray-400 dark:text-gray-500">
-                  · Updated {timeAgo(folder.last_indexed)}
-                </span>
+                <span className="text-gray-400 dark:text-gray-500">· {t('settings.folders.updated', { time: timeAgo(folder.last_indexed, t) })}</span>
               )}
               {/* Status badge */}
               <span className={`tap-sm inline-flex items-center gap-1 px-2 py-0.5 rounded-full font-medium ${
@@ -487,7 +492,7 @@ function FolderCard({
                   : 'bg-gray-100 dark:bg-dark-hover text-gray-500 dark:text-gray-400'
               }`}>
                 <span className={`w-1 h-1 rounded-full ${isWatching ? 'bg-green-500' : 'bg-gray-400'}`} />
-                {isWatching ? 'Watching for changes' : folder.status}
+                {isWatching ? t('settings.folders.watching') : folder.status}
               </span>
             </div>
           </div>
@@ -499,14 +504,14 @@ function FolderCard({
             onClick={() => onReindex(folder.path)}
             disabled={actionLoading === `reindex-${folder.path}`}
             className="tap-sm flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded-lg border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover disabled:opacity-50 transition-colors font-medium"
-            title="Re-scan this folder to pick up new and changed files"
+            title={t('settings.folders.reindexTitle')}
           >
             {actionLoading === `reindex-${folder.path}` ? (
               <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
             ) : (
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
             )}
-            {actionLoading === `reindex-${folder.path}` ? 'Refreshing…' : 'Refresh files'}
+            {actionLoading === `reindex-${folder.path}` ? t('settings.folders.refreshing') : t('settings.folders.refreshFiles')}
           </button>
 
           {showAdvanced && (
@@ -514,9 +519,9 @@ function FolderCard({
               onClick={() => onClearIndex(folder.path)}
               disabled={actionLoading === `clear-${folder.path}`}
               className="tap-sm flex-1 sm:flex-none px-3 py-2 text-xs rounded-lg border border-amber-200 dark:border-amber-900/50 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 disabled:opacity-50 transition-colors font-medium"
-              title="Remove the index for this folder only"
+              title={t('settings.folders.clearIndexTitle')}
             >
-              {actionLoading === `clear-${folder.path}` ? 'Clearing…' : 'Clear index'}
+              {actionLoading === `clear-${folder.path}` ? t('settings.folders.clearing') : t('settings.folders.clearIndex')}
             </button>
           )}
 
@@ -524,14 +529,14 @@ function FolderCard({
             onClick={() => onRemove(folder.path)}
             disabled={!!actionLoading && actionLoading !== folder.path}
             className="tap-sm flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 text-xs rounded-lg border border-red-200 dark:border-red-900/50 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 disabled:opacity-50 transition-colors font-medium"
-            title="Remove this folder from DeskSearch"
+            title={t('settings.folders.removeTitle')}
           >
             {actionLoading === folder.path ? (
               <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
             ) : (
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
             )}
-            {actionLoading === folder.path ? 'Removing…' : 'Remove'}
+            {actionLoading === folder.path ? t('settings.folders.removing') : t('common.remove')}
           </button>
         </div>
       </div>

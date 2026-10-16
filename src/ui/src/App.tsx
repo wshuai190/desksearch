@@ -10,6 +10,8 @@ import { useIndexStatus } from './hooks/useIndexStatus';
 import { API_BASE_URL } from './config';
 import type { SearchFilters, TabId } from './types';
 import type { SearchBarHandle } from './components/SearchBar';
+import LanguageToggle from './components/LanguageToggle';
+import { useI18n } from './i18n';
 
 // Lazy-load heavy tabs to keep initial bundle small
 const Dashboard = lazy(() => import('./components/Dashboard'));
@@ -28,16 +30,18 @@ const DEFAULT_FILTERS: SearchFilters = {
   folder: '',
 };
 
-const TABS: { id: TabId; label: string; icon: string }[] = [
-  { id: 'search',    label: 'Search',     icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
-  { id: 'dashboard', label: 'Dashboard',  icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z' },
-  { id: 'files',     label: 'Files',      icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
-  { id: 'folders',   label: 'Folders',    icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z' },
-  { id: 'analytics', label: 'Insights',   icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
-  { id: 'topics',    label: 'Topics',     icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
-  { id: 'duplicates',  label: 'Duplicates',    icon: 'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z' },
-  { id: 'datasources', label: 'Data Sources', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4' },
-  { id: 'settings',    label: 'Settings',     icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
+// Tab labels are translation keys resolved at render time (`labelKey`), so the
+// sidebar and the mobile tab bar follow the active language.
+const TABS: { id: TabId; labelKey: string; icon: string }[] = [
+  { id: 'search',    labelKey: 'app.nav.search',     icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
+  { id: 'dashboard', labelKey: 'app.nav.dashboard',  icon: 'M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z' },
+  { id: 'files',     labelKey: 'app.nav.files',      icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
+  { id: 'folders',   labelKey: 'app.nav.folders',    icon: 'M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z' },
+  { id: 'analytics', labelKey: 'app.nav.analytics',  icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+  { id: 'topics',    labelKey: 'app.nav.topics',     icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
+  { id: 'duplicates',  labelKey: 'app.nav.duplicates',  icon: 'M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z' },
+  { id: 'datasources', labelKey: 'app.nav.datasources', icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4' },
+  { id: 'settings',    labelKey: 'app.nav.settings',    icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
 ];
 
 // Skeleton fallback for lazy-loaded tabs
@@ -72,6 +76,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const searchBarRef = useRef<SearchBarHandle>(null);
+  const { t } = useI18n();
   const { data, loading, error } = useSearch(query, filters);
   const { status, error: statusError } = useIndexStatus();
 
@@ -165,13 +170,13 @@ export default function App() {
                     ? 'active bg-accent-blue/10 text-accent-blue font-medium'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-dark-hover'
                 }`}
-                title={sidebarCollapsed ? tab.label : undefined}
+                title={sidebarCollapsed ? t(tab.labelKey) : undefined}
               >
                 <svg className={`flex-shrink-0 ${sidebarCollapsed ? 'w-5 h-5' : 'w-4 h-4'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={isActive ? 2.2 : 1.8}>
                   <path strokeLinecap="round" strokeLinejoin="round" d={tab.icon} />
                 </svg>
                 {!sidebarCollapsed && (
-                  <span className="text-[13px] truncate">{tab.label}</span>
+                  <span className="text-[13px] truncate">{t(tab.labelKey)}</span>
                 )}
                 {/* Badge: show indexing dot on dashboard */}
                 {tab.id === 'dashboard' && status?.is_indexing && (
@@ -196,12 +201,12 @@ export default function App() {
             className={`w-full flex items-center gap-2.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors min-h-0 ${
               sidebarCollapsed ? 'px-0 py-2 justify-center' : 'px-3 py-2'
             }`}
-            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? t('app.sidebar.expandTitle') : t('app.sidebar.collapseTitle')}
           >
             <svg className={`flex-shrink-0 transition-transform ${sidebarCollapsed ? 'w-5 h-5 rotate-180' : 'w-4 h-4'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
             </svg>
-            {!sidebarCollapsed && <span className="text-[13px]">Collapse</span>}
+            {!sidebarCollapsed && <span className="text-[13px]">{t('app.sidebar.collapse')}</span>}
           </button>
 
           {/* Theme toggle */}
@@ -210,7 +215,7 @@ export default function App() {
             className={`w-full flex items-center gap-2.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors min-h-0 ${
               sidebarCollapsed ? 'px-0 py-2 justify-center' : 'px-3 py-2'
             }`}
-            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={darkMode ? t('app.theme.switchToLight') : t('app.theme.switchToDark')}
           >
             {darkMode ? (
               <svg className={`flex-shrink-0 ${sidebarCollapsed ? 'w-5 h-5' : 'w-4 h-4'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
@@ -221,8 +226,15 @@ export default function App() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
               </svg>
             )}
-            {!sidebarCollapsed && <span className="text-[13px]">{darkMode ? 'Light mode' : 'Dark mode'}</span>}
+            {!sidebarCollapsed && <span className="text-[13px]">{darkMode ? t('app.theme.light') : t('app.theme.dark')}</span>}
           </button>
+
+          {/* Language switch — mirrors the theme toggle above */}
+          {sidebarCollapsed ? (
+            <LanguageToggle className="w-full justify-center" />
+          ) : (
+            <LanguageToggle variant="row" showLabel />
+          )}
         </div>
       </aside>
 
@@ -258,6 +270,7 @@ export default function App() {
                 )}
               </button>
             )}
+            <LanguageToggle />
             <ThemeToggleButton darkMode={darkMode} onClick={toggleDarkMode} />
           </div>
         </header>
@@ -269,7 +282,7 @@ export default function App() {
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
-              <span>Searching for &ldquo;<span className="text-gray-700 dark:text-gray-200 font-medium">{query}</span>&rdquo;</span>
+              <span>{t('app.searchingFor')} &ldquo;<span className="text-gray-700 dark:text-gray-200 font-medium">{query}</span>&rdquo;</span>
             </div>
             <button
               onClick={() => setShowFilters(!showFilters)}
@@ -282,7 +295,7 @@ export default function App() {
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
               </svg>
-              Filters
+              {t('app.filtersButton')}
               {activeFilterCount > 0 && (
                 <span className="w-5 h-5 bg-accent-blue text-white text-[10px] rounded-full flex items-center justify-center font-medium">
                   {activeFilterCount}
@@ -386,7 +399,7 @@ export default function App() {
             >
               <path strokeLinecap="round" strokeLinejoin="round" d={tab.icon} />
             </svg>
-            <span className={activeTab === tab.id ? 'font-semibold' : 'font-medium'}>{tab.label}</span>
+            <span className={activeTab === tab.id ? 'font-semibold' : 'font-medium'}>{t(tab.labelKey)}</span>
           </button>
         ))}
         {/* More menu for remaining tabs */}
@@ -405,7 +418,7 @@ export default function App() {
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
             </svg>
-            <span className="font-medium">More</span>
+            <span className="font-medium">{t('app.nav.more')}</span>
           </button>
           <div id="mobile-more-menu" className="hidden absolute bottom-full right-0 mb-2 w-44 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl shadow-xl overflow-hidden animate-scaleIn z-30">
             {TABS.slice(5).map((tab) => (
@@ -424,7 +437,7 @@ export default function App() {
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
                   <path strokeLinecap="round" strokeLinejoin="round" d={tab.icon} />
                 </svg>
-                {tab.label}
+                {t(tab.labelKey)}
               </button>
             ))}
           </div>
@@ -436,12 +449,13 @@ export default function App() {
 
 // ── Theme toggle button ─────────────────────────────────────────
 function ThemeToggleButton({ darkMode, onClick }: { darkMode: boolean; onClick: () => void }) {
+  const { t } = useI18n();
   return (
     <button
       onClick={onClick}
       className="p-2 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors min-h-0"
-      title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-      aria-label="Toggle theme"
+      title={darkMode ? t('app.theme.switchToLight') : t('app.theme.switchToDark')}
+      aria-label={t('app.theme.toggleLabel')}
     >
       {darkMode ? (
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

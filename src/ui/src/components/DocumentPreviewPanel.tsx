@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 import type { RichPreview } from '../types';
 
 // File type badge colors
@@ -21,18 +22,11 @@ function getFileBg(type: string) {
   return FILE_TYPE_STYLES[type.toLowerCase()]?.bg ?? 'bg-gray-500';
 }
 
-function formatBytes(bytes?: number): string {
+function formatBytes(bytes: number | undefined, formatNumber: (value: number) => string): string {
   if (!bytes) return '';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1048576).toFixed(1)} MB`;
-}
-
-function formatDate(iso?: string): string {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: 'long', day: 'numeric', year: 'numeric',
-  });
+  if (bytes < 1024) return `${formatNumber(bytes)} B`;
+  if (bytes < 1048576) return `${formatNumber(bytes / 1024)} KB`;
+  return `${formatNumber(bytes / 1048576)} MB`;
 }
 
 interface DocumentPreviewPanelProps {
@@ -54,6 +48,7 @@ export default function DocumentPreviewPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const { t, formatNumber, formatDate } = useI18n();
 
   useEffect(() => {
     if (docId === null) return;
@@ -63,12 +58,15 @@ export default function DocumentPreviewPanel({
 
     fetch(`${API_BASE_URL}/api/preview/${docId}`)
       .then(r => {
-        if (!r.ok) throw new Error('Preview unavailable');
+        if (!r.ok) throw new Error(t('results.previewUnavailable'));
         return r.json();
       })
       .then(data => setPreview(data))
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
+    // `t` is intentionally omitted: the fallback message is only read on fetch failure
+    // and re-fetching the preview on a language switch would be wasted work.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId]);
 
   // Close on Escape
@@ -114,7 +112,8 @@ export default function DocumentPreviewPanel({
           <button
             onClick={onClose}
             className="flex-shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors"
-            title="Close (Esc)"
+            title={t('results.closeEsc')}
+            aria-label={t('results.closeEsc')}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -147,7 +146,7 @@ export default function DocumentPreviewPanel({
                   <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                   </svg>
-                  <span className="text-sm font-medium text-red-600 dark:text-red-400">Preview unavailable</span>
+                  <span className="text-sm font-medium text-red-600 dark:text-red-400">{t('results.previewUnavailable')}</span>
                 </div>
                 <p className="text-sm text-red-500 dark:text-red-400/80">{error}</p>
               </div>
@@ -159,9 +158,9 @@ export default function DocumentPreviewPanel({
               {/* Stats bar */}
               <div className="grid grid-cols-3 gap-px bg-gray-100 dark:bg-dark-border border-b border-gray-100 dark:border-dark-border">
                 {[
-                  { label: 'Size', value: formatBytes(preview.size) || '\u2014' },
-                  { label: 'Words', value: preview.word_count > 0 ? preview.word_count.toLocaleString() : '\u2014' },
-                  { label: 'Chunks', value: preview.num_chunks.toString() },
+                  { label: t('results.statSize'), value: formatBytes(preview.size, formatNumber) || '\u2014' },
+                  { label: t('results.statWords'), value: preview.word_count > 0 ? formatNumber(preview.word_count) : '\u2014' },
+                  { label: t('results.statChunks'), value: formatNumber(preview.num_chunks) },
                 ].map(({ label, value }) => (
                   <div key={label} className="bg-white dark:bg-dark-surface px-4 py-3.5 text-center">
                     <div className="text-sm font-semibold text-gray-900 dark:text-gray-100 tabular-nums">{value}</div>
@@ -176,7 +175,7 @@ export default function DocumentPreviewPanel({
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
-                  Last modified: <span className="text-gray-500">{formatDate(preview.modified)}</span>
+                  {t('results.lastModified')} <span className="text-gray-500">{formatDate(preview.modified, { month: 'long', day: 'numeric', year: 'numeric' })}</span>
                 </div>
               )}
 
@@ -184,7 +183,7 @@ export default function DocumentPreviewPanel({
               {preview.key_phrases.length > 0 && (
                 <div className="px-5 pt-4">
                   <h3 className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-2.5">
-                    Key Topics
+                    {t('results.keyTopics')}
                   </h3>
                   <div className="flex flex-wrap gap-1.5">
                     {preview.key_phrases.map((phrase) => (
@@ -202,7 +201,7 @@ export default function DocumentPreviewPanel({
               {/* Preview text */}
               <div className="px-5 pt-4 pb-2">
                 <h3 className="text-[11px] font-semibold text-gray-400 uppercase tracking-widest mb-2.5">
-                  Content Preview
+                  {t('results.contentPreview')}
                 </h3>
                 <div className="rounded-xl bg-gray-50 dark:bg-dark-hover border border-gray-100 dark:border-dark-border p-4">
                   <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-wrap font-mono text-[13px]">
@@ -223,12 +222,13 @@ export default function DocumentPreviewPanel({
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
             </svg>
-            Open File
+            {t('common.openFile')}
           </button>
           <button
             onClick={async () => { await navigator.clipboard.writeText(path); }}
             className="px-4 py-2.5 border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-300 text-sm font-medium rounded-xl hover:bg-gray-50 dark:hover:bg-dark-hover transition-colors"
-            title="Copy path"
+            title={t('results.copyPath')}
+            aria-label={t('results.copyPath')}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />

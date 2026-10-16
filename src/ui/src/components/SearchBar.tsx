@@ -1,4 +1,5 @@
-import { useRef, useEffect, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useRef, useEffect, useMemo, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useI18n } from '../i18n';
 
 const RECENT_SEARCHES_KEY = 'desksearch:recent-searches';
 const MAX_RECENT = 8;
@@ -18,46 +19,47 @@ function saveRecentSearch(query: string) {
   localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(recent.slice(0, MAX_RECENT)));
 }
 
-// Example searches that rotate on each page load
-const EXAMPLE_QUERIES = [
-  'meeting notes from last month',
-  'project budget spreadsheet',
-  'invoice from Acme Corp',
-  'Python script for data processing',
-  'notes about quarterly review',
-  'contract signed in 2023',
-  'email about the conference',
-  'todo list for the project',
+// Example searches live in the `search.examples.*` dictionary entries, so they
+// are shown in the active language. Three rotate every minute.
+const EXAMPLE_KEYS = [
+  'search.examples.0',
+  'search.examples.1',
+  'search.examples.2',
+  'search.examples.3',
+  'search.examples.4',
+  'search.examples.5',
+  'search.examples.6',
+  'search.examples.7',
 ];
 
-function getExamples(): string[] {
+function getExamples(t: (key: string) => string): string[] {
+  const all = EXAMPLE_KEYS.map((key) => t(key));
   const seed = Math.floor(Date.now() / 60000);
-  const shuffled = [...EXAMPLE_QUERIES].sort(() => {
-    return Math.sin(seed * 9301 + EXAMPLE_QUERIES.indexOf(EXAMPLE_QUERIES[0])) - 0.5;
-  });
-  return shuffled.slice(0, 3);
+  const start = seed % all.length;
+  return [all[start], all[(start + 3) % all.length], all[(start + 5) % all.length]];
 }
 
 // ── Quick stats shown on home screen ────────────────────────────────────────
 function QuickStats({ fileCount, lastIndexed, indexSizeMb }: { fileCount?: number; lastIndexed?: string | null; indexSizeMb?: number }) {
+  const { t, formatNumber, formatDate } = useI18n();
   if (!fileCount || fileCount === 0) return null;
 
   const formatLastIndexed = (dateStr: string | null | undefined): string => {
-    if (!dateStr) return 'Never';
+    if (!dateStr) return t('search.time.never');
     const date = new Date(dateStr);
     const now = new Date();
     const diffMin = Math.floor((now.getTime() - date.getTime()) / 60000);
-    if (diffMin < 1) return 'Just now';
-    if (diffMin < 60) return `${diffMin}m ago`;
+    if (diffMin < 1) return t('search.time.justNow');
+    if (diffMin < 60) return t('search.time.minutesAgo', { count: diffMin });
     const diffHrs = Math.floor(diffMin / 60);
-    if (diffHrs < 24) return `${diffHrs}h ago`;
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    if (diffHrs < 24) return t('search.time.hoursAgo', { count: diffHrs });
+    return formatDate(date, { month: 'short', day: 'numeric' });
   };
 
   const stats = [
-    { label: 'Files indexed', value: fileCount.toLocaleString(), icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
-    { label: 'Last updated', value: formatLastIndexed(lastIndexed), icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
-    ...(indexSizeMb && indexSizeMb > 0 ? [{ label: 'Index size', value: `${indexSizeMb.toFixed(1)} MB`, icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4' }] : []),
+    { label: t('search.stats.filesIndexed'), value: formatNumber(fileCount), icon: 'M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z' },
+    { label: t('search.stats.lastUpdated'), value: formatLastIndexed(lastIndexed), icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+    ...(indexSizeMb && indexSizeMb > 0 ? [{ label: t('search.stats.indexSize'), value: `${indexSizeMb.toFixed(1)} MB`, icon: 'M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4' }] : []),
   ];
 
   return (
@@ -69,7 +71,7 @@ function QuickStats({ fileCount, lastIndexed, indexSizeMb }: { fileCount?: numbe
           </svg>
           <span className="text-xs">
             <span className="font-medium text-gray-600 dark:text-gray-300">{s.value}</span>
-            {' '}<span className="hidden sm:inline">{s.label.toLowerCase()}</span>
+            {' '}<span className="hidden sm:inline">{s.label}</span>
           </span>
         </div>
       ))}
@@ -79,10 +81,11 @@ function QuickStats({ fileCount, lastIndexed, indexSizeMb }: { fileCount?: numbe
 
 // ── Search tips for home screen ─────────────────────────────────────────────
 function SearchTips() {
+  const { t } = useI18n();
   const tips = [
-    { icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346A3.5 3.5 0 0114.5 20.5H9.5a3.5 3.5 0 01-2.471-1.026l-.347-.346z', text: 'Search by meaning, not just keywords' },
-    { icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', text: 'Filter by date, file type, or folder' },
-    { icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z', text: 'Use voice search or press / to focus' },
+    { icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346A3.5 3.5 0 0114.5 20.5H9.5a3.5 3.5 0 01-2.471-1.026l-.347-.346z', text: t('search.tips.meaning') },
+    { icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', text: t('search.tips.filters') },
+    { icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z', text: t('search.tips.voice') },
   ];
 
   return (
@@ -107,7 +110,8 @@ interface CenteredHeroProps {
 }
 
 function CenteredHero({ fileCount, isIndexing, onExampleClick }: CenteredHeroProps) {
-  const [examples] = useState(getExamples);
+  const { t, formatNumber } = useI18n();
+  const examples = useMemo(() => getExamples(t), [t]);
 
   const hasFiles = fileCount !== undefined && fileCount > 0;
   const noFiles = fileCount !== undefined && fileCount === 0 && !isIndexing;
@@ -131,7 +135,7 @@ function CenteredHero({ fileCount, isIndexing, onExampleClick }: CenteredHeroPro
         <p className="text-gray-500 dark:text-gray-400 text-base sm:text-lg mb-4">
           <span className="inline-flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse inline-block" />
-            Reading your files... you can already start searching!
+            {t('search.indexing')}
           </span>
         </p>
       )}
@@ -139,10 +143,10 @@ function CenteredHero({ fileCount, isIndexing, onExampleClick }: CenteredHeroPro
       {noFiles && (
         <div className="mb-4 space-y-2">
           <p className="text-gray-500 dark:text-gray-400 text-base sm:text-lg">
-            No files indexed yet
+            {t('search.noFilesTitle')}
           </p>
           <p className="text-sm text-gray-400 dark:text-gray-500">
-            Go to the <strong className="text-gray-600 dark:text-gray-300">Folders</strong> tab and add a folder to get started.
+            {t('search.noFilesHint', { tab: t('app.nav.folders') })}
           </p>
         </div>
       )}
@@ -150,8 +154,8 @@ function CenteredHero({ fileCount, isIndexing, onExampleClick }: CenteredHeroPro
       {!isIndexing && !noFiles && (
         <p className="text-gray-500 dark:text-gray-400 text-base sm:text-lg mb-4">
           {hasFiles
-            ? `Search ${fileCount!.toLocaleString()} files by meaning`
-            : 'Search your files by meaning, not just keywords'}
+            ? t('search.subtitleCount', { count: formatNumber(fileCount!) })
+            : t('search.subtitleGeneric')}
         </p>
       )}
 
@@ -159,7 +163,7 @@ function CenteredHero({ fileCount, isIndexing, onExampleClick }: CenteredHeroPro
       {hasFiles && !isIndexing && (
         <div className="mt-5 sm:mt-6">
           <p className="text-[11px] text-gray-400 dark:text-gray-500 mb-2.5 uppercase tracking-widest font-medium">
-            Try searching for
+            {t('search.trySearching')}
           </p>
           <div className="flex flex-wrap justify-center gap-2">
             {examples.map((q) => (
@@ -196,12 +200,29 @@ export interface SearchBarHandle {
 
 const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
   ({ query, onQueryChange, centered, onArrowDown, fileCount, isIndexing, lastIndexed, indexSizeMb }, ref) => {
+    const { t, lang } = useI18n();
     const inputRef = useRef<HTMLInputElement>(null);
     const [recentSearches, setRecentSearches] = useState<string[]>([]);
     const [showRecent, setShowRecent] = useState(false);
     const [isListening, setIsListening] = useState(false);
     const containerRef = useRef<HTMLDivElement>(null);
     const commitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    // ── IME (Chinese / Japanese / Korean) support ──────────────────────────
+    // While a composition is active the input value is only provisional (raw
+    // pinyin such as "zhongwen"), so it is kept in `draft` and never propagated
+    // as a search query. The committed text is pushed on `compositionend`,
+    // which is what stops half-typed pinyin from being searched or saved into
+    // recent searches, and lets the IME own Enter/Arrow/Escape.
+    const [draft, setDraft] = useState(query);
+    const [isComposing, setIsComposing] = useState(false);
+    const composingRef = useRef(false);
+
+    // Adopt external changes (recent-search click, example click, Esc clear)
+    // but never clobber the characters the IME is currently composing.
+    useEffect(() => {
+      if (!composingRef.current) setDraft(query);
+    }, [query]);
 
     useImperativeHandle(ref, () => ({
       focus: () => {
@@ -238,6 +259,9 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     // Global keyboard shortcuts
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
+        // An active IME composition owns the keyboard (candidate navigation,
+        // commit with Enter) — never steal those keys.
+        if (e.isComposing) return;
         if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
           e.preventDefault();
           inputRef.current?.focus();
@@ -263,6 +287,10 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
     }, [onQueryChange]);
 
     const handleInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+      // Let the IME handle Enter/Arrow/Escape while composing (choosing a
+      // Chinese character from the candidate list must not trigger a search
+      // nor move focus to the results list).
+      if (composingRef.current || e.nativeEvent.isComposing) return;
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         setShowRecent(false);
@@ -276,11 +304,12 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        alert('Voice search is not supported in this browser.');
+        alert(t('search.voiceUnsupported'));
         return;
       }
       const recognition = new SpeechRecognition();
-      recognition.lang = navigator.language || 'en-US';
+      // Dictate in the language the UI is set to, not the OS locale.
+      recognition.lang = lang === 'zh' ? 'zh-CN' : 'en-US';
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
 
@@ -296,7 +325,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
       };
       recognition.onerror = () => setIsListening(false);
       recognition.onend = () => setIsListening(false);
-    }, [onQueryChange]);
+    }, [onQueryChange, lang, t]);
 
     const hasSpeechRecognition =
       typeof window !== 'undefined' &&
@@ -342,16 +371,38 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
             autoCorrect="off"
             autoCapitalize="off"
             spellCheck="false"
-            value={query}
+            /* While an IME composition is in flight the draft owns the text;
+               afterwards the parent's committed query does. */
+            value={isComposing ? draft : query}
             onChange={(e) => {
-              onQueryChange(e.target.value);
-              if (e.target.value === '') setShowRecent(true);
+              const value = e.target.value;
+              if (composingRef.current) {
+                // Provisional IME text (pinyin etc.) — keep it local only.
+                setDraft(value);
+                setShowRecent(false);
+                return;
+              }
+              setDraft(value);
+              onQueryChange(value);
+              if (value === '') setShowRecent(true);
               else setShowRecent(false);
+            }}
+            onCompositionStart={() => {
+              composingRef.current = true;
+              setIsComposing(true);
+            }}
+            onCompositionEnd={(e) => {
+              composingRef.current = false;
+              setIsComposing(false);
+              const value = (e.target as HTMLInputElement).value;
+              setDraft(value);
+              onQueryChange(value);
+              setShowRecent(value === '');
             }}
             onKeyDown={handleInputKeyDown}
             onFocus={handleFocus}
             onBlur={handleBlur}
-            placeholder={isListening ? 'Listening...' : 'Search your files...'}
+            placeholder={isListening ? t('search.placeholderListening') : t('search.placeholder')}
             className={`search-input w-full bg-white dark:bg-dark-surface border border-gray-200/80 dark:border-dark-border
               rounded-2xl pl-12 text-gray-900 dark:text-gray-100
               placeholder-gray-400 dark:placeholder-gray-500
@@ -370,8 +421,8 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                     ? 'text-red-500 bg-red-50 dark:bg-red-900/20 animate-pulse'
                     : 'text-gray-400 hover:text-accent-blue hover:bg-gray-100 dark:hover:bg-dark-hover'
                 }`}
-                title={isListening ? 'Listening...' : 'Search by voice'}
-                aria-label="Voice search"
+                title={isListening ? t('search.placeholderListening') : t('search.voiceSearch')}
+                aria-label={t('search.voiceSearch')}
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
@@ -391,8 +442,8 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
               <button
                 onClick={() => { onQueryChange(''); setShowRecent(true); inputRef.current?.focus(); }}
                 className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover transition-colors"
-                title="Clear (Esc)"
-                aria-label="Clear search"
+                title={t('search.clearTitle')}
+                aria-label={t('search.clearLabel')}
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -406,7 +457,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
         {showRecent && recentSearches.length > 0 && (
           <div className="absolute top-full left-0 right-0 mt-2 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-xl shadow-lg z-30 overflow-hidden animate-slideDown">
             <div className="px-4 py-2.5 text-[11px] text-gray-400 dark:text-gray-500 border-b border-gray-100 dark:border-dark-border font-medium uppercase tracking-widest">
-              Recent searches
+              {t('search.recentSearches')}
             </div>
             {recentSearches.map((s) => (
               <button
@@ -425,7 +476,7 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
                 <span
                   className="opacity-0 group-hover/item:opacity-100 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 text-base leading-none px-1 transition-opacity"
                   onClick={(e) => clearRecentSearch(e, s)}
-                  title="Remove"
+                  title={t('search.removeRecent')}
                 >
                   &times;
                 </span>
@@ -439,8 +490,8 @@ const SearchBar = forwardRef<SearchBarHandle, SearchBarProps>(
           <>
             {/* Keyboard hint */}
             <p className="text-center text-xs text-gray-400 dark:text-gray-500 mt-3 hidden sm:block">
-              Press <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">⌘K</kbd> or{' '}
-              <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">/</kbd> to focus anytime
+              {t('search.kbdHintBefore')} <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">⌘K</kbd> {t('search.kbdHintOr')}{' '}
+              <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">/</kbd> {t('search.kbdHintAfter')}
             </p>
 
             {/* Quick stats */}

@@ -1,18 +1,20 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import type { RichSearchResponse, RichSearchResult } from '../types';
+import { useI18n } from '../i18n';
 import ResultCard from './ResultCard';
 import NLAnswerBanner from './NLAnswerBanner';
 
 // ── Sort options ────────────────────────────────────────────────────────────
 type SortOption = 'relevance' | 'date-newest' | 'date-oldest' | 'size-largest' | 'size-smallest' | 'type';
 
-const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-  { value: 'relevance',     label: 'Relevance' },
-  { value: 'date-newest',   label: 'Date (newest)' },
-  { value: 'date-oldest',   label: 'Date (oldest)' },
-  { value: 'size-largest',  label: 'Size (largest)' },
-  { value: 'size-smallest', label: 'Size (smallest)' },
-  { value: 'type',          label: 'File type' },
+/** `labelKey` is a full i18n key; translated at render time. */
+const SORT_OPTIONS: { value: SortOption; labelKey: string }[] = [
+  { value: 'relevance',     labelKey: 'results.sortRelevance' },
+  { value: 'date-newest',   labelKey: 'results.sortDateNewest' },
+  { value: 'date-oldest',   labelKey: 'results.sortDateOldest' },
+  { value: 'size-largest',  labelKey: 'results.sortSizeLargest' },
+  { value: 'size-smallest', labelKey: 'results.sortSizeSmallest' },
+  { value: 'type',          labelKey: 'results.sortFileType' },
 ];
 
 function sortResults(results: RichSearchResult[], sort: SortOption): RichSearchResult[] {
@@ -77,14 +79,11 @@ function SkeletonCard({ delay = 0 }: { delay?: number }) {
 }
 
 // ── Empty state ──────────────────────────────────────────────────────────────
-const SEARCH_TIPS = [
-  'Try describing what the file is about, e.g. "project budget spreadsheet"',
-  'Use natural language like "meeting notes from last month"',
-  'Search by content, not filename \u2014 e.g. "invoice from Acme Corp"',
-  'Broaden your search \u2014 remove specific dates or names',
-];
+/** i18n keys, translated at render time. */
+const SEARCH_TIPS = ['results.tip1', 'results.tip2', 'results.tip3', 'results.tip4'];
 
 function EmptyState({ query }: { query: string }) {
+  const { t } = useI18n();
   return (
     <div className="text-center py-16 sm:py-20 px-4 animate-fadeIn">
       {/* Empty state illustration */}
@@ -94,21 +93,21 @@ function EmptyState({ query }: { query: string }) {
         </svg>
       </div>
       <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">
-        No results for &ldquo;{query}&rdquo;
+        {t('results.emptyTitle', { query })}
       </h3>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 max-w-sm mx-auto">
-        Try describing your file differently. DeskSearch understands meaning, so a different phrasing might find what you need.
+        {t('results.emptyBody')}
       </p>
 
       {/* Tips */}
       <div className="text-left max-w-sm mx-auto space-y-2.5">
-        <p className="text-[11px] text-gray-400 uppercase tracking-widest font-medium mb-3">Search tips</p>
-        {SEARCH_TIPS.map((tip, i) => (
+        <p className="text-[11px] text-gray-400 uppercase tracking-widest font-medium mb-3">{t('results.searchTips')}</p>
+        {SEARCH_TIPS.map((tipKey, i) => (
           <div key={i} className="flex items-start gap-2.5 text-sm text-gray-500 dark:text-gray-400">
             <svg className="w-4 h-4 text-accent-blue flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.347.346A3.5 3.5 0 0114.5 20.5H9.5a3.5 3.5 0 01-2.471-1.026l-.347-.346z" />
             </svg>
-            <span>{tip}</span>
+            <span>{t(tipKey)}</span>
           </div>
         ))}
       </div>
@@ -121,7 +120,7 @@ function EmptyState({ query }: { query: string }) {
         }}
         className="mt-8 px-5 py-2.5 bg-accent-blue text-white text-sm font-medium rounded-xl hover:bg-accent-blue-hover transition-all duration-200 shadow-sm hover:shadow-md"
       >
-        Try a new search
+        {t('results.newSearch')}
       </button>
     </div>
   );
@@ -129,6 +128,7 @@ function EmptyState({ query }: { query: string }) {
 
 // ── Error state ──────────────────────────────────────────────────────────────
 function ErrorState({ message }: { message: string }) {
+  const { t } = useI18n();
   const isServerDown = message.toLowerCase().includes('fetch') ||
     message.toLowerCase().includes('network') ||
     message.toLowerCase().includes('connect');
@@ -145,18 +145,18 @@ function ErrorState({ message }: { message: string }) {
         </svg>
       </div>
       <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-2">
-        {isServerDown ? "Can't reach DeskSearch" : "Something went wrong"}
+        {isServerDown ? t('results.errorTitleServer') : t('results.errorTitleGeneric')}
       </h3>
       <p className="text-sm text-gray-500 dark:text-gray-400 max-w-sm mx-auto">
         {isServerDown
-          ? 'Make sure the DeskSearch app is running, then try again.'
-          : 'Try refreshing the page. If this keeps happening, restart DeskSearch.'}
+          ? t('results.errorBodyServer')
+          : t('results.errorBodyGeneric')}
       </p>
       <button
         onClick={() => window.location.reload()}
         className="mt-6 px-5 py-2.5 bg-gray-100 dark:bg-dark-hover text-gray-700 dark:text-gray-200 text-sm font-medium rounded-xl hover:bg-gray-200 dark:hover:bg-dark-border transition-colors"
       >
-        Refresh page
+        {t('results.refreshPage')}
       </button>
     </div>
   );
@@ -169,16 +169,19 @@ function SearchStats({ data, loading, sort, onSortChange }: {
   sort: SortOption;
   onSortChange: (s: SortOption) => void;
 }) {
+  const { t, formatNumber } = useI18n();
   const total = data.total;
   const ms = data.query_time_ms;
-  const timeStr = ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+  const timeStr = ms < 1000
+    ? t('results.timeMs', { ms: formatNumber(Math.round(ms)) })
+    : t('results.timeSeconds', { seconds: (ms / 1000).toFixed(1) });
 
   return (
     <div className="flex items-center justify-between mb-4">
       <div className="flex items-center gap-2">
         <p className="text-sm text-gray-500 dark:text-gray-400">
-          <span className="font-semibold text-gray-700 dark:text-gray-300 tabular-nums">{total.toLocaleString()}</span>
-          {' '}{total === 1 ? 'result' : 'results'}
+          <span className="font-semibold text-gray-700 dark:text-gray-300 tabular-nums">{formatNumber(total)}</span>
+          {' '}{t('results.countLabel', { count: total })}
           <span className="text-gray-400 dark:text-gray-500 hidden sm:inline"> &middot; {timeStr}</span>
         </p>
         {loading && (
@@ -194,7 +197,7 @@ function SearchStats({ data, loading, sort, onSortChange }: {
           className="appearance-none text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-dark-hover border border-gray-200 dark:border-dark-border rounded-xl pl-3 pr-7 py-2 focus:outline-none focus:ring-1 focus:ring-accent-blue/50 focus:border-accent-blue cursor-pointer transition-colors hover:border-gray-300 dark:hover:border-dark-border"
         >
           {SORT_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
+            <option key={opt.value} value={opt.value}>{t(opt.labelKey)}</option>
           ))}
         </select>
         <svg className="w-3.5 h-3.5 text-gray-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -207,23 +210,24 @@ function SearchStats({ data, loading, sort, onSortChange }: {
 
 // ── Keyboard nav hint (desktop only) ─────────────────────────────────────────
 function NavHint() {
+  const { t } = useI18n();
   return (
     <div className="hidden sm:flex items-center gap-4 mt-6 justify-center text-xs text-gray-400 dark:text-gray-500">
       <span className="flex items-center gap-1.5">
         <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">↑↓</kbd>
-        Navigate
+        {t('results.hintNavigate')}
       </span>
       <span className="flex items-center gap-1.5">
         <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">Tab</kbd>
-        Next result
+        {t('results.hintNextResult')}
       </span>
       <span className="flex items-center gap-1.5">
         <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">↵</kbd>
-        Open file
+        {t('common.openFile')}
       </span>
       <span className="flex items-center gap-1.5">
         <kbd className="bg-gray-100 dark:bg-dark-border px-1.5 py-0.5 rounded-md font-mono text-[11px] border border-gray-200 dark:border-dark-border/50">Esc</kbd>
-        New search
+        {t('results.hintNewSearch')}
       </span>
     </div>
   );

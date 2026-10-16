@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n, type TranslateParams } from '../i18n';
 
 interface ProgressData {
   state: 'idle' | 'discovering' | 'indexing' | 'complete' | 'error';
@@ -13,20 +14,28 @@ interface ProgressData {
   errors: { file: string; message: string }[];
 }
 
-function formatElapsed(sec: number): string {
-  if (sec < 60) return `${Math.round(sec)}s`;
+type Translate = (key: string, params?: TranslateParams) => string;
+type FormatNumber = (value: number) => string;
+
+function formatElapsed(sec: number, t: Translate, formatNumber: FormatNumber): string {
+  if (sec < 60) {
+    return t('onboarding.progress.elapsedSeconds', { seconds: formatNumber(Math.round(sec)) });
+  }
   const m = Math.floor(sec / 60);
   const s = Math.round(sec % 60);
-  return `${m}m ${s}s`;
+  return t('onboarding.progress.elapsedMinutesSeconds', {
+    minutes: formatNumber(m),
+    seconds: formatNumber(s),
+  });
 }
 
-function phaseLabel(phase: string): string {
+function phaseLabel(t: Translate, phase: string): string {
   switch (phase) {
-    case 'discovery': return 'Discovering files';
-    case 'parsing': return 'Reading files';
-    case 'embedding': return 'Generating embeddings';
-    case 'storing': return 'Saving to index';
-    default: return phase || 'Processing';
+    case 'discovery': return t('onboarding.progress.phase.discovery');
+    case 'parsing': return t('onboarding.progress.phase.parsing');
+    case 'embedding': return t('onboarding.progress.phase.embedding');
+    case 'storing': return t('onboarding.progress.phase.storing');
+    default: return phase || t('onboarding.progress.phase.processing');
   }
 }
 
@@ -35,6 +44,7 @@ interface IndexingProgressProps {
 }
 
 export default function IndexingProgress({ isIndexing }: IndexingProgressProps) {
+  const { t, formatNumber } = useI18n();
   const [progress, setProgress] = useState<ProgressData | null>(null);
   const [showComplete, setShowComplete] = useState(false);
   const [completeSummary, setCompleteSummary] = useState('');
@@ -48,7 +58,12 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
       setProgress(data);
 
       if (data.state === 'complete') {
-        const summary = `Indexed ${data.processed} files in ${formatElapsed(data.elapsed_sec)} (${data.files_per_sec} files/sec)`;
+        const summary = t('onboarding.progress.completeSummary', {
+          count: data.processed,
+          files: formatNumber(data.processed),
+          time: formatElapsed(data.elapsed_sec, t, formatNumber),
+          rate: formatNumber(data.files_per_sec),
+        });
         setCompleteSummary(summary);
         setShowComplete(true);
         // Stop polling
@@ -60,7 +75,7 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
     } catch {
       // ignore fetch errors
     }
-  }, []);
+  }, [t, formatNumber]);
 
   useEffect(() => {
     if (isIndexing) {
@@ -126,7 +141,7 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
             <div className="flex items-center gap-3">
               <Spinner />
               <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
-                Getting started…
+                {t('onboarding.progress.gettingStarted')}
               </span>
             </div>
           </div>
@@ -148,7 +163,11 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
               </svg>
             </div>
             <span className="text-sm font-medium text-red-800 dark:text-red-300">
-              Indexing failed — {progress.errors.length > 0 ? progress.errors[progress.errors.length - 1].message : 'Unknown error'}
+              {t('onboarding.progress.failed', {
+                message: progress.errors.length > 0
+                  ? progress.errors[progress.errors.length - 1].message
+                  : t('onboarding.progress.unknownError'),
+              })}
             </span>
           </div>
         </div>
@@ -169,7 +188,7 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
             {/* Top row: phase + stats */}
             <div className="flex items-center justify-between gap-2 mb-1">
               <span className="text-sm font-medium text-amber-800 dark:text-amber-300 truncate">
-                {phaseLabel(progress.phase)}
+                {phaseLabel(t, progress.phase)}
                 {progress.current_file && (
                   <span className="font-normal text-amber-600 dark:text-amber-400">
                     {' — '}{progress.current_file}
@@ -204,19 +223,31 @@ export default function IndexingProgress({ isIndexing }: IndexingProgressProps) 
             {/* Bottom row: detailed stats */}
             <div className="flex items-center gap-3 text-xs text-amber-600 dark:text-amber-500 tabular-nums">
               {hasPercent && (
-                <span>{progress.processed} / {progress.total} files</span>
+                <span>
+                  {t('onboarding.progress.filesOfTotal', {
+                    processed: formatNumber(progress.processed),
+                    total: formatNumber(progress.total),
+                  })}
+                </span>
               )}
               {isDiscovery && progress.total > 0 && (
-                <span>Found {progress.total} files</span>
+                <span>
+                  {t('onboarding.progress.foundFiles', {
+                    count: progress.total,
+                    files: formatNumber(progress.total),
+                  })}
+                </span>
               )}
               {progress.files_per_sec > 0 && (
-                <span>{progress.files_per_sec} files/sec</span>
+                <span>{t('onboarding.progress.filesPerSec', { rate: formatNumber(progress.files_per_sec) })}</span>
               )}
               {progress.elapsed_sec > 0 && (
-                <span>{formatElapsed(progress.elapsed_sec)}</span>
+                <span>{formatElapsed(progress.elapsed_sec, t, formatNumber)}</span>
               )}
               {progress.errors.length > 0 && (
-                <span className="text-red-500">{progress.errors.length} error{progress.errors.length > 1 ? 's' : ''}</span>
+                <span className="text-red-500">
+                  {t('onboarding.progress.errorCount', { count: progress.errors.length })}
+                </span>
               )}
             </div>
           </div>

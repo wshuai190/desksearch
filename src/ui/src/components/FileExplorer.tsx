@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 import type { FileInfo, FilesResponse } from '../types';
 
 function formatSize(bytes: number): string {
@@ -8,15 +9,10 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return '-';
-  const d = new Date(dateStr);
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
 type SortField = 'filename' | 'path' | 'type' | 'size' | 'modified' | 'num_chunks' | 'indexed_time';
 
 export default function FileExplorer() {
+  const { t, formatNumber, formatDate } = useI18n();
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -104,6 +100,9 @@ export default function FileExplorer() {
 
   const totalPages = Math.ceil(total / pageSize);
 
+  /** Locale-aware date cell; `-` for records without a timestamp. */
+  const dateCell = (value: string | null): string => (value ? formatDate(value) : '-');
+
   const SortIcon = ({ field }: { field: SortField }) => {
     if (sortBy !== field) return null;
     return <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>;
@@ -131,8 +130,8 @@ export default function FileExplorer() {
       )}
 
       <div className="flex items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Indexed Files</h2>
-        <div className="text-sm text-gray-500">{total.toLocaleString()} files</div>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t('panels.explorer.indexedFiles')}</h2>
+        <div className="text-sm text-gray-500">{t('panels.explorer.countFiles', { count: total })}</div>
       </div>
 
       {/* Controls */}
@@ -141,7 +140,7 @@ export default function FileExplorer() {
           type="text"
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
-          placeholder="Search files..."
+          placeholder={t('panels.explorer.searchPlaceholder')}
           className="flex-1 max-w-xs px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-surface text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue/50"
         />
         <select
@@ -149,7 +148,7 @@ export default function FileExplorer() {
           onChange={(e) => { setTypeFilter(e.target.value); setPage(1); }}
           className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-surface text-gray-900 dark:text-white focus:outline-none"
         >
-          <option value="">All types</option>
+          <option value="">{t('panels.explorer.allTypes')}</option>
           {['pdf', 'txt', 'md', 'py', 'js', 'ts', 'json', 'html', 'docx', 'csv'].map(t => (
             <option key={t} value={t}>.{t}</option>
           ))}
@@ -159,7 +158,7 @@ export default function FileExplorer() {
             onClick={removeSelected}
             className="px-3 py-1.5 text-xs rounded-lg border border-red-200 dark:border-red-900/50 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
           >
-            Remove {selected.size} selected
+            {t('panels.explorer.removeSelected', { count: selected.size })}
           </button>
         )}
       </div>
@@ -178,14 +177,15 @@ export default function FileExplorer() {
                     else setSelected(new Set(files.map(f => f.doc_id)));
                   }}
                   className="rounded"
+                  aria-label={t('common.selectAll')}
                 />
               </th>
-              <ThSortable field="filename" current={sortBy} onClick={handleSort}>Name<SortIcon field="filename" /></ThSortable>
-              <ThSortable field="type" current={sortBy} onClick={handleSort}>Type<SortIcon field="type" /></ThSortable>
-              <ThSortable field="size" current={sortBy} onClick={handleSort}>Size<SortIcon field="size" /></ThSortable>
-              <ThSortable field="modified" current={sortBy} onClick={handleSort}>Modified<SortIcon field="modified" /></ThSortable>
-              <ThSortable field="num_chunks" current={sortBy} onClick={handleSort}>Chunks<SortIcon field="num_chunks" /></ThSortable>
-              <ThSortable field="indexed_time" current={sortBy} onClick={handleSort}>Indexed<SortIcon field="indexed_time" /></ThSortable>
+              <ThSortable field="filename" current={sortBy} onClick={handleSort}>{t('panels.explorer.colName')}<SortIcon field="filename" /></ThSortable>
+              <ThSortable field="type" current={sortBy} onClick={handleSort}>{t('panels.explorer.colType')}<SortIcon field="type" /></ThSortable>
+              <ThSortable field="size" current={sortBy} onClick={handleSort}>{t('panels.explorer.colSize')}<SortIcon field="size" /></ThSortable>
+              <ThSortable field="modified" current={sortBy} onClick={handleSort}>{t('panels.explorer.colModified')}<SortIcon field="modified" /></ThSortable>
+              <ThSortable field="num_chunks" current={sortBy} onClick={handleSort}>{t('panels.explorer.colChunks')}<SortIcon field="num_chunks" /></ThSortable>
+              <ThSortable field="indexed_time" current={sortBy} onClick={handleSort}>{t('panels.explorer.colIndexed')}<SortIcon field="indexed_time" /></ThSortable>
             </tr>
           </thead>
           <tbody>
@@ -210,8 +210,8 @@ export default function FileExplorer() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
                       </svg>
                     </div>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">No files found</p>
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Try a different filter or add folders to index</p>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{t('panels.explorer.noFilesFound')}</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{t('panels.explorer.noFilesFoundHint')}</p>
                   </div>
                 </td>
               </tr>
@@ -227,6 +227,7 @@ export default function FileExplorer() {
                       checked={selected.has(f.doc_id)}
                       onChange={() => toggleSelect(f.doc_id)}
                       className="rounded"
+                      aria-label={f.filename}
                     />
                   </td>
                   <td className="px-3 py-2">
@@ -244,9 +245,9 @@ export default function FileExplorer() {
                     </span>
                   </td>
                   <td className="px-3 py-2 text-gray-500 tabular-nums">{formatSize(f.size)}</td>
-                  <td className="px-3 py-2 text-gray-500">{formatDate(f.modified)}</td>
-                  <td className="px-3 py-2 text-gray-500 tabular-nums">{f.num_chunks}</td>
-                  <td className="px-3 py-2 text-gray-500">{formatDate(f.indexed_time)}</td>
+                  <td className="px-3 py-2 text-gray-500">{dateCell(f.modified)}</td>
+                  <td className="px-3 py-2 text-gray-500 tabular-nums">{formatNumber(f.num_chunks)}</td>
+                  <td className="px-3 py-2 text-gray-500">{dateCell(f.indexed_time)}</td>
                 </tr>
               ))
             )}
@@ -258,7 +259,7 @@ export default function FileExplorer() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-sm">
           <div className="text-gray-500">
-            Page {page} of {totalPages}
+            {t('panels.explorer.pageOf', { page, total: totalPages })}
           </div>
           <div className="flex gap-2">
             <button
@@ -266,14 +267,14 @@ export default function FileExplorer() {
               disabled={page <= 1}
               className="px-3 py-1 rounded border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover disabled:opacity-50 transition-colors"
             >
-              Prev
+              {t('panels.explorer.prev')}
             </button>
             <button
               onClick={() => setPage(p => Math.min(totalPages, p + 1))}
               disabled={page >= totalPages}
               className="px-3 py-1 rounded border border-gray-200 dark:border-dark-border text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-hover disabled:opacity-50 transition-colors"
             >
-              Next
+              {t('panels.explorer.next')}
             </button>
           </div>
         </div>

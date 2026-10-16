@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 
 interface DetectedFolder {
   path: string;
@@ -9,31 +10,40 @@ interface DetectedFolder {
 
 type Step = 'welcome' | 'folders' | 'indexing' | 'done';
 
-const CATEGORY_INFO: Record<string, { label: string; icon: string; description: string }> = {
-  documents: { label: 'Documents',    icon: '📁', description: 'Your main document storage' },
-  developer: { label: 'Code & Projects', icon: '💻', description: 'Source code and project files' },
-  notes:     { label: 'Notes',        icon: '📝', description: 'Notes and writing' },
+// Labels/descriptions are i18n keys — the `onboarding.` prefix lives in the key
+// itself, so these can be passed straight to `t(...)` at render time.
+const CATEGORY_INFO: Record<string, { labelKey: string; icon: string; descriptionKey: string }> = {
+  documents: { labelKey: 'onboarding.category.documents.label', icon: '📁', descriptionKey: 'onboarding.category.documents.description' },
+  developer: { labelKey: 'onboarding.category.developer.label', icon: '💻', descriptionKey: 'onboarding.category.developer.description' },
+  notes:     { labelKey: 'onboarding.category.notes.label',     icon: '📝', descriptionKey: 'onboarding.category.notes.description' },
 };
 
 const FEATURES = [
   {
     icon: '💬',
-    title: 'Search like you\'re talking to someone',
-    body: 'Ask "what were the key takeaways from the Q3 meeting?" instead of guessing filenames.',
+    titleKey: 'onboarding.features.conversational.title',
+    bodyKey: 'onboarding.features.conversational.body',
   },
   {
     icon: '🔒',
-    title: 'Completely private — nothing leaves your Mac',
-    body: 'All processing happens on your computer. No cloud, no uploads, no data sharing.',
+    titleKey: 'onboarding.features.private.title',
+    bodyKey: 'onboarding.features.private.body',
   },
   {
     icon: '⚡',
-    title: 'Works on PDFs, Word docs, code, and more',
-    body: 'DeskSearch reads and understands dozens of file formats.',
+    titleKey: 'onboarding.features.formats.title',
+    bodyKey: 'onboarding.features.formats.body',
   },
 ];
 
+const EXAMPLE_QUERY_KEYS = [
+  'onboarding.done.example.meeting',
+  'onboarding.done.example.budget',
+  'onboarding.done.example.proposal',
+];
+
 export default function Onboarding({ onComplete }: { onComplete: () => void }) {
+  const { t, formatNumber } = useI18n();
   const [step, setStep] = useState<Step>('welcome');
   const [folders, setFolders] = useState<DetectedFolder[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -120,10 +130,10 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
           <div className="space-y-3">
             <div className="text-6xl">🔍</div>
             <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white">
-              Welcome to DeskSearch
+              {t('onboarding.welcome.title')}
             </h1>
             <p className="text-lg text-gray-500 dark:text-gray-400 leading-relaxed">
-              Find anything on your computer — by describing what you're looking for, not just the filename.
+              {t('onboarding.welcome.subtitle')}
             </p>
           </div>
 
@@ -133,8 +143,8 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               <div key={i} className="flex items-start gap-4 p-4 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-2xl">
                 <span className="text-2xl flex-shrink-0">{f.icon}</span>
                 <div>
-                  <div className="font-semibold text-gray-800 dark:text-gray-200 text-sm">{f.title}</div>
-                  <div className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{f.body}</div>
+                  <div className="font-semibold text-gray-800 dark:text-gray-200 text-sm">{t(f.titleKey)}</div>
+                  <div className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">{t(f.bodyKey)}</div>
                 </div>
               </div>
             ))}
@@ -146,10 +156,10 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               onClick={() => setStep('folders')}
               className="tap-sm w-full sm:w-auto px-10 py-4 bg-accent-blue text-white rounded-2xl font-semibold text-lg hover:bg-accent-blue-hover transition-colors shadow-lg shadow-accent-blue/25"
             >
-              Get started →
+              {t('onboarding.welcome.cta')}
             </button>
             <p className="text-xs text-gray-400 dark:text-gray-500">
-              Takes about 2 minutes to set up
+              {t('onboarding.welcome.hint')}
             </p>
           </div>
         </div>
@@ -169,12 +179,11 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
                 <span className="text-accent-blue text-sm font-bold">1</span>
               </div>
               <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
-                Which folders should DeskSearch know about?
+                {t('onboarding.folders.title')}
               </h2>
             </div>
             <p className="text-sm text-gray-500 dark:text-gray-400 pl-11">
-              We found these folders on your Mac. Check the ones you'd like to be able to search.
-              You can always add or remove folders later.
+              {t('onboarding.folders.subtitle')}
             </p>
           </div>
 
@@ -189,7 +198,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
             <div className="space-y-4">
               <div className="text-center py-6 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-2xl">
                 <p className="text-gray-500 dark:text-gray-400 text-sm">
-                  No common folders detected. Add a folder path below to get started.
+                  {t('onboarding.folders.empty')}
                 </p>
               </div>
               <div className="flex gap-2">
@@ -198,7 +207,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
                   value={manualPath}
                   onChange={e => setManualPath(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && addManualFolder()}
-                  placeholder="Enter folder path, e.g. ~/Documents"
+                  placeholder={t('onboarding.folders.pathPlaceholder')}
                   className="flex-1 px-4 py-3 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-surface text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue"
                 />
                 <button
@@ -206,7 +215,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
                   disabled={!manualPath.trim()}
                   className="tap-sm px-5 py-3 bg-accent-blue text-white rounded-xl font-medium text-sm hover:bg-accent-blue-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Add
+                  {t('common.add')}
                 </button>
               </div>
             </div>
@@ -238,7 +247,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
                       </div>
                     </div>
                     <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0 hidden sm:block">
-                      {cat.description}
+                      {t(cat.descriptionKey)}
                     </span>
                   </label>
                 );
@@ -254,7 +263,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
                 value={manualPath}
                 onChange={e => setManualPath(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && addManualFolder()}
-                placeholder="Add another folder path…"
+                placeholder={t('onboarding.folders.addAnotherPlaceholder')}
                 className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 dark:border-dark-border bg-white dark:bg-dark-surface text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue"
               />
               <button
@@ -262,7 +271,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
                 disabled={!manualPath.trim()}
                 className="tap-sm px-4 py-2.5 bg-accent-blue text-white rounded-xl font-medium text-sm hover:bg-accent-blue-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Add
+                {t('common.add')}
               </button>
             </div>
           )}
@@ -274,14 +283,14 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
                 onClick={() => setSelected(new Set(folders.map(f => f.path)))}
                 className="tap-sm hover:text-accent-blue transition-colors"
               >
-                Select all
+                {t('common.selectAll')}
               </button>
               <span className="text-gray-300 dark:text-gray-600">·</span>
               <button
                 onClick={() => setSelected(new Set())}
                 className="tap-sm hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
               >
-                Clear selection
+                {t('onboarding.folders.clearSelection')}
               </button>
             </div>
           )}
@@ -292,7 +301,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               onClick={() => setStep('welcome')}
               className="tap-sm px-4 py-2.5 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
             >
-              ← Back
+              ← {t('common.back')}
             </button>
             <button
               onClick={handleStartIndexing}
@@ -300,8 +309,8 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               className="tap-sm flex items-center gap-2 px-8 py-3 bg-accent-blue text-white rounded-2xl font-semibold hover:bg-accent-blue-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-lg shadow-accent-blue/25"
             >
               {selected.size === 0
-                ? 'Select at least one folder'
-                : `Start indexing ${selected.size} folder${selected.size !== 1 ? 's' : ''} →`}
+                ? t('onboarding.folders.selectAtLeastOne')
+                : t('onboarding.folders.startIndexing', { count: selected.size })}
             </button>
           </div>
         </div>
@@ -331,11 +340,10 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
 
           <div className="space-y-2">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
-              Reading your files…
+              {t('onboarding.indexing.title')}
             </h2>
             <p className="text-gray-500 dark:text-gray-400 text-sm sm:text-base leading-relaxed">
-              DeskSearch is learning what's in your files so it can answer your questions.
-              This usually takes a few minutes.
+              {t('onboarding.indexing.body')}
             </p>
           </div>
 
@@ -343,8 +351,8 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
           {fileCount > 0 && (
             <div className="inline-flex items-center gap-3 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border px-5 py-3 rounded-2xl">
               <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <span className="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">{fileCount.toLocaleString()}</span>
-              <span className="text-sm text-gray-500">files processed</span>
+              <span className="text-2xl font-bold text-gray-900 dark:text-white tabular-nums">{formatNumber(fileCount)}</span>
+              <span className="text-sm text-gray-500">{t('onboarding.indexing.filesProcessed')}</span>
             </div>
           )}
 
@@ -357,8 +365,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
           </div>
 
           <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 rounded-2xl p-4 text-sm text-blue-700 dark:text-blue-300">
-            💡 <strong>Tip:</strong> You don't have to wait here — you can start searching as files are indexed.
-            Searches will get better as more files are processed.
+            💡 <strong>{t('onboarding.indexing.tipLabel')}</strong> {t('onboarding.indexing.tipBody')}
           </div>
 
           {fileCount > 0 && (
@@ -366,7 +373,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               onClick={onComplete}
               className="tap-sm text-sm text-accent-blue hover:text-accent-blue-hover underline underline-offset-2 transition-colors"
             >
-              I'll start searching now →
+              {t('onboarding.indexing.startSearching')}
             </button>
           )}
         </div>
@@ -386,29 +393,27 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
 
         <div className="space-y-2">
           <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">
-            You're all set!
+            {t('onboarding.done.title')}
           </h2>
           <p className="text-gray-500 dark:text-gray-400 leading-relaxed">
-            <strong className="text-gray-700 dark:text-gray-300">{fileCount.toLocaleString()} files</strong> are now
-            searchable. Just describe what you're looking for in plain English.
+            <strong className="text-gray-700 dark:text-gray-300">
+              {t('onboarding.done.count', { count: fileCount, files: formatNumber(fileCount) })}
+            </strong>{' '}
+            {t('onboarding.done.bodyRest')}
           </p>
         </div>
 
         {/* Example searches */}
         <div className="text-left bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-2xl p-4 space-y-2">
           <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-3">
-            Try searching for…
+            {t('onboarding.done.trySearching')}
           </p>
-          {[
-            'meeting notes from last week',
-            'project budget spreadsheet',
-            'notes about the client proposal',
-          ].map(q => (
+          {EXAMPLE_QUERY_KEYS.map(q => (
             <div key={q} className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
               <svg className="w-4 h-4 text-accent-blue flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
               </svg>
-              <span className="italic">{q}</span>
+              <span className="italic">{t(q)}</span>
             </div>
           ))}
         </div>
@@ -417,7 +422,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
           onClick={onComplete}
           className="tap-sm w-full py-4 bg-accent-blue text-white rounded-2xl font-semibold text-lg hover:bg-accent-blue-hover transition-colors shadow-lg shadow-accent-blue/25"
         >
-          Start searching →
+          {t('onboarding.done.startSearching')}
         </button>
       </div>
     </div>

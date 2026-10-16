@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 import type { DashboardStats, ActivityEntry } from '../types';
 
 const TYPE_COLORS: Record<string, string> = {
@@ -23,19 +24,6 @@ const TYPE_TEXT_COLORS: Record<string, string> = {
 function formatBytes(mb: number): string {
   if (mb < 1) return `${Math.round(mb * 1024)} KB`;
   return `${mb.toFixed(1)} MB`;
-}
-
-function timeAgo(dateStr: string): string {
-  const d = new Date(dateStr);
-  const now = Date.now();
-  const diff = now - d.getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
 }
 
 // ── Skeleton components ──────────────────────────────────────────────────────
@@ -62,9 +50,22 @@ function SkeletonPanel() {
 }
 
 export default function Dashboard() {
+  const { t, formatNumber } = useI18n();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const timeAgo = (dateStr: string): string => {
+    const d = new Date(dateStr);
+    const diff = Date.now() - d.getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return t('panels.dashboard.timeAgoJustNow');
+    if (mins < 60) return t('panels.dashboard.timeAgoMinutes', { count: mins });
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return t('panels.dashboard.timeAgoHours', { count: hrs });
+    const days = Math.floor(hrs / 24);
+    return t('panels.dashboard.timeAgoDays', { count: days });
+  };
 
   useEffect(() => {
     let active = true;
@@ -113,7 +114,7 @@ export default function Dashboard() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
           </svg>
         </div>
-        <p className="text-gray-500 dark:text-gray-400 text-sm">Failed to load dashboard data</p>
+        <p className="text-gray-500 dark:text-gray-400 text-sm">{t('panels.dashboard.failedToLoad')}</p>
       </div>
     );
   }
@@ -126,24 +127,24 @@ export default function Dashboard() {
       {/* Stats cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard
-          label="Total Files"
-          value={stats.total_documents.toLocaleString()}
+          label={t('panels.dashboard.totalFiles')}
+          value={formatNumber(stats.total_documents)}
           icon="📄"
         />
         <StatCard
-          label="Chunks"
-          value={stats.total_chunks.toLocaleString()}
+          label={t('common.chunks')}
+          value={formatNumber(stats.total_chunks)}
           icon="🧩"
-          subtitle="indexed segments"
+          subtitle={t('panels.dashboard.indexedSegments')}
         />
         <StatCard
-          label="Index Size"
+          label={t('panels.dashboard.indexSize')}
           value={formatBytes(stats.index_size_mb)}
           icon="💾"
         />
         <StatCard
-          label="Status"
-          value={stats.is_indexing ? 'Indexing…' : 'Ready'}
+          label={t('panels.dashboard.status')}
+          value={stats.is_indexing ? t('panels.dashboard.statusIndexing') : t('panels.dashboard.statusReady')}
           icon={stats.is_indexing ? '⏳' : '✅'}
           valueClass={stats.is_indexing ? 'text-yellow-400' : 'text-green-400'}
           pulse={stats.is_indexing}
@@ -153,12 +154,12 @@ export default function Dashboard() {
       <div className="grid md:grid-cols-2 gap-6">
         {/* File type breakdown */}
         <div className="bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">File Types</h3>
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">{t('panels.dashboard.fileTypes')}</h3>
           {typeEntries.length === 0 ? (
             <div className="text-center py-6">
               <div className="text-3xl mb-2">📂</div>
-              <p className="text-sm text-gray-400">No files indexed yet</p>
-              <p className="text-xs text-gray-300 dark:text-gray-500 mt-1">Add folders in the Folders tab</p>
+              <p className="text-sm text-gray-400">{t('panels.dashboard.noFilesIndexed')}</p>
+              <p className="text-xs text-gray-300 dark:text-gray-500 mt-1">{t('panels.dashboard.addFoldersHint')}</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -196,12 +197,12 @@ export default function Dashboard() {
 
         {/* Watched folders */}
         <div className="bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Watched Folders</h3>
+          <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">{t('panels.dashboard.watchedFolders')}</h3>
           {stats.watched_folders.length === 0 ? (
             <div className="text-center py-6">
               <div className="text-3xl mb-2">📁</div>
-              <p className="text-sm text-gray-400">No folders configured</p>
-              <p className="text-xs text-gray-300 dark:text-gray-500 mt-1">Go to the Folders tab to add some</p>
+              <p className="text-sm text-gray-400">{t('panels.dashboard.noFoldersConfigured')}</p>
+              <p className="text-xs text-gray-300 dark:text-gray-500 mt-1">{t('panels.dashboard.addFoldersConfiguredHint')}</p>
             </div>
           ) : (
             <div className="space-y-2 max-h-52 overflow-y-auto">
@@ -217,13 +218,13 @@ export default function Dashboard() {
                         {f.path.replace(/^\/Users\/[^/]+/, '~')}
                       </div>
                       {f.last_indexed && (
-                        <div className="text-xs text-gray-400 mt-0.5">Indexed {timeAgo(f.last_indexed)}</div>
+                        <div className="text-xs text-gray-400 mt-0.5">{t('panels.dashboard.indexedAgo', { time: timeAgo(f.last_indexed) })}</div>
                       )}
                     </div>
                   </div>
                   <div className="flex flex-col items-end ml-3 shrink-0">
                     <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{f.file_count}</span>
-                    <span className="text-xs text-gray-400">files</span>
+                    <span className="text-xs text-gray-400">{t('common.files')}</span>
                   </div>
                 </div>
               ))}
@@ -234,11 +235,11 @@ export default function Dashboard() {
 
       {/* Recent activity */}
       <div className="bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">Recent Indexing Activity</h3>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-4">{t('panels.dashboard.recentActivity')}</h3>
         {activity.length === 0 ? (
           <div className="text-center py-8">
             <div className="text-3xl mb-2">🕐</div>
-            <p className="text-sm text-gray-400">No recent activity</p>
+            <p className="text-sm text-gray-400">{t('panels.dashboard.noRecentActivity')}</p>
           </div>
         ) : (
           <div className="space-y-0 max-h-80 overflow-y-auto">
@@ -254,7 +255,7 @@ export default function Dashboard() {
                   <span className="truncate text-sm text-gray-700 dark:text-gray-300">{entry.filename}</span>
                 </div>
                 <div className="flex items-center gap-3 ml-3 shrink-0 text-xs text-gray-400">
-                  <span>{entry.num_chunks} chunks</span>
+                  <span>{t('common.chunks', { count: entry.num_chunks })}</span>
                   <span>{timeAgo(entry.indexed_time)}</span>
                 </div>
               </div>

@@ -1,21 +1,23 @@
 import { useEffect, useState } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 import type { SearchFilters, FolderInfo } from '../types';
 
+// Labels are i18n keys — the `filters.` prefix is added by the locale registry.
 const FILE_TYPE_OPTIONS = [
-  { value: 'pdf',  label: 'PDF',        color: 'bg-red-500' },
-  { value: 'txt',  label: 'Text',       color: 'bg-gray-500' },
-  { value: 'md',   label: 'Markdown',   color: 'bg-gray-600' },
-  { value: 'docx', label: 'Word',       color: 'bg-blue-600' },
-  { value: 'xlsx', label: 'Excel',      color: 'bg-green-600' },
-  { value: 'csv',  label: 'CSV',        color: 'bg-green-500' },
-  { value: 'py',   label: 'Python',     color: 'bg-sky-600' },
-  { value: 'js',   label: 'JavaScript', color: 'bg-yellow-500' },
-  { value: 'ts',   label: 'TypeScript', color: 'bg-blue-500' },
-  { value: 'html', label: 'HTML',       color: 'bg-orange-500' },
-  { value: 'json', label: 'JSON',       color: 'bg-yellow-600' },
-  { value: 'eml',  label: 'Email',      color: 'bg-indigo-500' },
-  { value: 'ipynb',label: 'Notebook',   color: 'bg-orange-500' },
+  { value: 'pdf',  labelKey: 'filters.type.pdf',  color: 'bg-red-500' },
+  { value: 'txt',  labelKey: 'filters.type.txt',  color: 'bg-gray-500' },
+  { value: 'md',   labelKey: 'filters.type.md',   color: 'bg-gray-600' },
+  { value: 'docx', labelKey: 'filters.type.docx', color: 'bg-blue-600' },
+  { value: 'xlsx', labelKey: 'filters.type.xlsx', color: 'bg-green-600' },
+  { value: 'csv',  labelKey: 'filters.type.csv',  color: 'bg-green-500' },
+  { value: 'py',   labelKey: 'filters.type.py',   color: 'bg-sky-600' },
+  { value: 'js',   labelKey: 'filters.type.js',   color: 'bg-yellow-500' },
+  { value: 'ts',   labelKey: 'filters.type.ts',   color: 'bg-blue-500' },
+  { value: 'html', labelKey: 'filters.type.html', color: 'bg-orange-500' },
+  { value: 'json', labelKey: 'filters.type.json', color: 'bg-yellow-600' },
+  { value: 'eml',  labelKey: 'filters.type.eml',  color: 'bg-indigo-500' },
+  { value: 'ipynb',labelKey: 'filters.type.ipynb',color: 'bg-orange-500' },
 ];
 
 interface FiltersProps {
@@ -29,6 +31,7 @@ function shortenPath(path: string): string {
 }
 
 export default function Filters({ filters, onFiltersChange, visible }: FiltersProps) {
+  const { t } = useI18n();
   const [watchedFolders, setWatchedFolders] = useState<FolderInfo[]>([]);
 
   useEffect(() => {
@@ -43,7 +46,7 @@ export default function Filters({ filters, onFiltersChange, visible }: FiltersPr
 
   const toggleFileType = (type: string) => {
     const types = filters.file_types.includes(type)
-      ? filters.file_types.filter((t) => t !== type)
+      ? filters.file_types.filter((ft) => ft !== type)
       : [...filters.file_types, type];
     onFiltersChange({ ...filters, file_types: types });
   };
@@ -59,13 +62,13 @@ export default function Filters({ filters, onFiltersChange, visible }: FiltersPr
     <div className="w-52 flex-shrink-0 space-y-5 animate-slideDown">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Filters</h3>
+        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">{t('filters.title')}</h3>
         {hasFilters && (
           <button
             onClick={clearFilters}
             className="text-xs text-accent-blue hover:text-accent-blue-hover transition-colors font-medium"
           >
-            Clear all
+            {t('common.clearAll')}
           </button>
         )}
       </div>
@@ -73,7 +76,7 @@ export default function Filters({ filters, onFiltersChange, visible }: FiltersPr
       {/* File Type */}
       <div>
         <h4 className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2">
-          File Type
+          {t('filters.fileType')}
         </h4>
         <div className="space-y-0.5 max-h-52 overflow-y-auto">
           {FILE_TYPE_OPTIONS.map((opt) => {
@@ -94,7 +97,7 @@ export default function Filters({ filters, onFiltersChange, visible }: FiltersPr
                   className="w-3.5 h-3.5 rounded border-gray-300 dark:border-dark-border text-accent-blue focus:ring-accent-blue/50 bg-transparent"
                 />
                 <span className={`w-2 h-2 rounded-full ${opt.color} flex-shrink-0`} />
-                <span className="text-sm">{opt.label}</span>
+                <span className="text-sm">{t(opt.labelKey)}</span>
               </label>
             );
           })}
@@ -104,11 +107,11 @@ export default function Filters({ filters, onFiltersChange, visible }: FiltersPr
       {/* Date Range */}
       <div>
         <h4 className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2">
-          Date Range
+          {t('filters.dateRange')}
         </h4>
         <div className="space-y-2">
           <div>
-            <label className="text-[11px] text-gray-400 mb-1 block">From</label>
+            <label className="text-[11px] text-gray-400 mb-1 block">{t('filters.from')}</label>
             <input
               type="date"
               value={filters.date_from}
@@ -120,7 +123,7 @@ export default function Filters({ filters, onFiltersChange, visible }: FiltersPr
             />
           </div>
           <div>
-            <label className="text-[11px] text-gray-400 mb-1 block">To</label>
+            <label className="text-[11px] text-gray-400 mb-1 block">{t('filters.to')}</label>
             <input
               type="date"
               value={filters.date_to}
@@ -137,7 +140,7 @@ export default function Filters({ filters, onFiltersChange, visible }: FiltersPr
       {/* Folder */}
       <div>
         <h4 className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-widest mb-2">
-          Folder
+          {t('filters.folder')}
         </h4>
         {watchedFolders.length > 0 ? (
           <div className="space-y-0.5">
@@ -155,7 +158,7 @@ export default function Filters({ filters, onFiltersChange, visible }: FiltersPr
                 onChange={() => onFiltersChange({ ...filters, folder: '' })}
                 className="w-3.5 h-3.5 text-accent-blue border-gray-300 focus:ring-accent-blue/50"
               />
-              <span className="text-sm">All folders</span>
+              <span className="text-sm">{t('filters.allFolders')}</span>
             </label>
             {watchedFolders.map(f => (
               <label
@@ -183,7 +186,7 @@ export default function Filters({ filters, onFiltersChange, visible }: FiltersPr
             type="text"
             value={filters.folder}
             onChange={(e) => onFiltersChange({ ...filters, folder: e.target.value })}
-            placeholder="e.g. ~/Documents"
+            placeholder={t('filters.folderPlaceholder')}
             className="w-full text-sm px-2.5 py-1.5 rounded-lg border border-gray-200 dark:border-dark-border
               bg-white dark:bg-dark-surface text-gray-700 dark:text-gray-300
               placeholder-gray-400 dark:placeholder-gray-500

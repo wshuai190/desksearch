@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 import type { CollectionsResponse, TopicInfo } from '../types';
 
 const TOPIC_COLORS = [
@@ -23,6 +24,7 @@ function TopicCard({ topic, index, onOpenFile }: {
   index: number;
   onOpenFile: (path: string) => void;
 }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const colorClass = TOPIC_COLORS[index % TOPIC_COLORS.length];
   const dotColor = DOT_COLORS[index % DOT_COLORS.length];
@@ -42,7 +44,7 @@ function TopicCard({ topic, index, onOpenFile }: {
             {topic.label}
           </div>
           <div className="text-xs text-gray-400 mt-0.5">
-            {topic.doc_count} document{topic.doc_count !== 1 ? 's' : ''}
+            {t('panels.topics.docCount', { count: topic.doc_count })}
           </div>
         </div>
         <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${colorClass}`}>
@@ -76,7 +78,7 @@ function TopicCard({ topic, index, onOpenFile }: {
               onClick={() => setExpanded(true)}
               className="w-full text-center py-2 text-xs text-accent-blue hover:text-blue-700 transition-colors"
             >
-              +{remaining} more files
+              {t('panels.topics.showMore', { count: remaining })}
             </button>
           )}
           {expanded && topic.doc_count > 4 && (
@@ -84,7 +86,7 @@ function TopicCard({ topic, index, onOpenFile }: {
               onClick={() => setExpanded(false)}
               className="w-full text-center py-2 text-xs text-gray-400 hover:text-gray-600 transition-colors"
             >
-              Show less
+              {t('panels.topics.showLess')}
             </button>
           )}
         </div>
@@ -94,6 +96,7 @@ function TopicCard({ topic, index, onOpenFile }: {
 }
 
 export default function TopicsPanel() {
+  const { t } = useI18n();
   const [data, setData] = useState<CollectionsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -129,20 +132,20 @@ export default function TopicsPanel() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            🗂 Smart Collections
+            {t('panels.topics.title')}
           </h2>
           <p className="text-sm text-gray-400 mt-0.5">
-            Your documents, automatically grouped by topic
+            {t('panels.topics.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500">Topics:</label>
+          <label className="text-xs text-gray-500">{t('panels.topics.topicsLabel')}</label>
           <select
             value={nTopics ?? 0}
             onChange={e => handleNChange(Number(e.target.value) || 0)}
             className="text-sm border border-gray-200 dark:border-dark-border rounded-lg px-2 py-1.5 bg-white dark:bg-dark-surface text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-accent-blue/50"
           >
-            <option value={0}>Auto</option>
+            <option value={0}>{t('panels.topics.autoOption')}</option>
             {[3, 5, 7, 10, 12].map(n => (
               <option key={n} value={n}>{n}</option>
             ))}
@@ -150,7 +153,8 @@ export default function TopicsPanel() {
           <button
             onClick={() => load(nTopics)}
             className="p-1.5 rounded-lg border border-gray-200 dark:border-dark-border text-gray-500 hover:text-accent-blue hover:border-accent-blue/50 transition-colors"
-            title="Refresh clusters"
+            title={t('panels.topics.refreshClusters')}
+            aria-label={t('panels.topics.refreshClusters')}
           >
             <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -170,13 +174,13 @@ export default function TopicsPanel() {
       {error && !loading && (
         <div className="text-center py-12">
           <div className="text-3xl mb-3">⚠️</div>
-          <p className="text-gray-500">Could not load topics</p>
+          <p className="text-gray-500">{t('panels.topics.loadFailed')}</p>
           <p className="text-xs text-gray-400 mt-1">{error}</p>
           <button
             onClick={() => load(nTopics)}
             className="mt-3 text-sm text-accent-blue hover:underline"
           >
-            Try again
+            {t('panels.topics.tryAgain')}
           </button>
         </div>
       )}
@@ -184,9 +188,9 @@ export default function TopicsPanel() {
       {!loading && !error && data && data.topics.length === 0 && (
         <div className="text-center py-16 bg-white dark:bg-dark-surface border border-gray-100 dark:border-dark-border rounded-xl">
           <div className="text-4xl mb-3">🗂</div>
-          <p className="text-gray-600 dark:text-gray-400 font-medium">Not enough documents</p>
+          <p className="text-gray-600 dark:text-gray-400 font-medium">{t('panels.topics.notEnoughDocuments')}</p>
           <p className="text-sm text-gray-400 mt-1">
-            Index at least a few documents to see topic groups
+            {t('panels.topics.notEnoughDocumentsHint')}
           </p>
         </div>
       )}
@@ -194,13 +198,10 @@ export default function TopicsPanel() {
       {!loading && data && data.topics.length > 0 && (
         <>
           <div className="mb-4 text-sm text-gray-500 dark:text-gray-400">
-            <span className="font-medium text-gray-700 dark:text-gray-300">
-              {data.topics.length} topics
-            </span>
-            {' '}discovered across{' '}
-            <span className="font-medium text-gray-700 dark:text-gray-300">
-              {data.total_docs_clustered} documents
-            </span>
+            {t('panels.topics.summary', {
+              topics: t('panels.topics.summaryTopics', { count: data.topics.length }),
+              docs: t('panels.topics.summaryDocuments', { count: data.total_docs_clustered }),
+            })}
           </div>
 
           <div className="space-y-2">
@@ -215,8 +216,8 @@ export default function TopicsPanel() {
           </div>
 
           <p className="text-xs text-gray-400 text-center mt-6">
-            Topics are generated from document content using AI clustering.
-            <br />They update automatically as your index changes.
+            {t('panels.topics.footer1')}
+            <br />{t('panels.topics.footer2')}
           </p>
         </>
       )}

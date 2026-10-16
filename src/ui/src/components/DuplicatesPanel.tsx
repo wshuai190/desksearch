@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 import type { DuplicatesResponse, DuplicatePair } from '../types';
 
 function SimilarityBadge({ score }: { score: number }) {
+  const { t } = useI18n();
   const pct = Math.round(score * 100);
   const color =
     score >= 0.98 ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800/40'
@@ -11,7 +13,7 @@ function SimilarityBadge({ score }: { score: number }) {
 
   return (
     <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${color}`}>
-      {pct}% similar
+      {t('panels.duplicates.similarityPercent', { percent: pct })}
     </span>
   );
 }
@@ -21,6 +23,7 @@ function FileCard({ filename, path, onOpen }: {
   path: string;
   onOpen: () => void;
 }) {
+  const { t } = useI18n();
   const shortPath = path.replace(/^\/Users\/[^/]+/, '~');
   return (
     <div className="flex-1 min-w-0 p-3 bg-gray-50 dark:bg-dark-hover rounded-lg border border-gray-100 dark:border-dark-border">
@@ -40,12 +43,13 @@ function FileCard({ filename, path, onOpen }: {
           onClick={onOpen}
           className="flex-1 text-xs py-1.5 px-2 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-md hover:border-accent-blue/50 hover:text-accent-blue transition-colors text-center text-gray-600 dark:text-gray-300 font-medium"
         >
-          Open
+          {t('common.open')}
         </button>
         <button
           onClick={async () => navigator.clipboard.writeText(path)}
           className="text-xs py-1.5 px-2 bg-white dark:bg-dark-surface border border-gray-200 dark:border-dark-border rounded-md hover:border-gray-300 transition-colors text-gray-400"
-          title="Copy path"
+          title={t('panels.duplicates.copyPath')}
+          aria-label={t('panels.duplicates.copyPath')}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -57,16 +61,17 @@ function FileCard({ filename, path, onOpen }: {
 }
 
 function DuplicateRow({ pair, onOpen }: { pair: DuplicatePair; onOpen: (path: string) => void }) {
+  const { t } = useI18n();
   return (
     <div className="bg-white dark:bg-dark-surface border border-gray-100 dark:border-dark-border rounded-xl p-4">
       <div className="flex items-center justify-between mb-3">
         <SimilarityBadge score={pair.similarity} />
         <span className="text-xs text-gray-400">
           {pair.similarity >= 0.98
-            ? '⚠️ Near-identical content'
+            ? t('panels.duplicates.nearIdentical')
             : pair.similarity >= 0.95
-            ? 'Very similar content'
-            : 'Similar content'}
+            ? t('panels.duplicates.verySimilar')
+            : t('panels.duplicates.similar')}
         </span>
       </div>
       <div className="flex gap-3 items-stretch">
@@ -93,6 +98,7 @@ function DuplicateRow({ pair, onOpen }: { pair: DuplicatePair; onOpen: (path: st
 }
 
 export default function DuplicatesPanel() {
+  const { t } = useI18n();
   const [data, setData] = useState<DuplicatesResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -120,14 +126,14 @@ export default function DuplicatesPanel() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-            🔁 Duplicate Files
+            {t('panels.duplicates.title')}
           </h2>
           <p className="text-sm text-gray-400 mt-0.5">
-            Files with nearly identical content
+            {t('panels.duplicates.subtitle')}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <label className="text-xs text-gray-500">Sensitivity:</label>
+          <label className="text-xs text-gray-500">{t('panels.duplicates.sensitivityLabel')}</label>
           <select
             value={threshold}
             onChange={e => {
@@ -137,15 +143,16 @@ export default function DuplicatesPanel() {
             }}
             className="text-sm border border-gray-200 dark:border-dark-border rounded-lg px-2 py-1.5 bg-white dark:bg-dark-surface text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-accent-blue/50"
           >
-            <option value={0.98}>Very strict (98%+)</option>
-            <option value={0.95}>Strict (95%+)</option>
-            <option value={0.92}>Normal (92%+)</option>
-            <option value={0.85}>Loose (85%+)</option>
+            <option value={0.98}>{t('panels.duplicates.sensitivityVeryStrict')}</option>
+            <option value={0.95}>{t('panels.duplicates.sensitivityStrict')}</option>
+            <option value={0.92}>{t('panels.duplicates.sensitivityNormal')}</option>
+            <option value={0.85}>{t('panels.duplicates.sensitivityLoose')}</option>
           </select>
           <button
             onClick={() => load(threshold)}
             className="p-1.5 rounded-lg border border-gray-200 dark:border-dark-border text-gray-500 hover:text-accent-blue hover:border-accent-blue/50 transition-colors"
-            title="Re-scan"
+            title={t('panels.duplicates.rescan')}
+            aria-label={t('panels.duplicates.rescan')}
           >
             <svg className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -165,10 +172,10 @@ export default function DuplicatesPanel() {
       {error && !loading && (
         <div className="text-center py-12">
           <div className="text-3xl mb-3">⚠️</div>
-          <p className="text-gray-500">Scan failed</p>
+          <p className="text-gray-500">{t('panels.duplicates.scanFailed')}</p>
           <p className="text-xs text-gray-400 mt-1">{error}</p>
           <button onClick={() => load(threshold)} className="mt-3 text-sm text-accent-blue hover:underline">
-            Try again
+            {t('panels.duplicates.tryAgain')}
           </button>
         </div>
       )}
@@ -181,19 +188,19 @@ export default function DuplicatesPanel() {
               <span className="text-2xl">⚠️</span>
               <div>
                 <p className="text-sm font-semibold text-orange-700 dark:text-orange-300">
-                  Found {data.total} {data.total === 1 ? 'pair' : 'pairs'} of similar files
+                  {t('panels.duplicates.foundPairs', { count: data.total })}
                 </p>
                 <p className="text-xs text-orange-600/70 dark:text-orange-400/70 mt-0.5">
-                  Review them below and delete any unwanted copies
+                  {t('panels.duplicates.foundPairsHint')}
                 </p>
               </div>
             </div>
           ) : (
             <div className="text-center py-16 bg-white dark:bg-dark-surface border border-gray-100 dark:border-dark-border rounded-xl">
               <div className="text-4xl mb-3">✅</div>
-              <p className="text-gray-700 dark:text-gray-300 font-semibold">No duplicates found</p>
+              <p className="text-gray-700 dark:text-gray-300 font-semibold">{t('panels.duplicates.noneFound')}</p>
               <p className="text-sm text-gray-400 mt-1">
-                All your files have unique content at the {Math.round(threshold * 100)}% similarity threshold
+                {t('panels.duplicates.noneFoundHint', { percent: Math.round(threshold * 100) })}
               </p>
             </div>
           )}
@@ -211,8 +218,8 @@ export default function DuplicatesPanel() {
 
           {data.total > 0 && (
             <p className="text-xs text-gray-400 text-center mt-6">
-              Similarity is based on document content, not filenames.
-              <br />Open both files to compare before deleting.
+              {t('panels.duplicates.footer1')}
+              <br />{t('panels.duplicates.footer2')}
             </p>
           )}
         </>

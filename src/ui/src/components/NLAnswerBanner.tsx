@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useI18n } from '../i18n';
 import type { NLAnswer } from '../types';
 
 interface NLAnswerBannerProps {
@@ -7,6 +8,7 @@ interface NLAnswerBannerProps {
 }
 
 export default function NLAnswerBanner({ answer }: NLAnswerBannerProps) {
+  const { t } = useI18n();
   const [dismissed, setDismissed] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -29,16 +31,16 @@ export default function NLAnswerBanner({ answer }: NLAnswerBannerProps) {
             </svg>
           </div>
           <span className="text-xs font-semibold text-accent-blue uppercase tracking-widest">
-            AI Answer
+            {t('filters.answer.title')}
           </span>
           <span className="text-[11px] text-gray-400 dark:text-gray-500 font-normal normal-case tracking-normal">
-            Extracted from your documents
+            {t('filters.answer.extracted')}
           </span>
         </div>
         <button
           onClick={() => setDismissed(true)}
           className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors p-1 rounded-md hover:bg-gray-100/50 dark:hover:bg-white/5"
-          title="Dismiss"
+          title={t('common.close')}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -64,20 +66,20 @@ export default function NLAnswerBanner({ answer }: NLAnswerBannerProps) {
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
               </svg>
-              Copied
+              {t('common.copied')}
             </>
           ) : (
             <>
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
-              Copy answer
+              {t('filters.answer.copy')}
             </>
           )}
         </button>
         <span className="text-gray-200 dark:text-gray-700">|</span>
         <span className="text-[11px] text-gray-400 dark:text-gray-500">
-          Scroll down to see source documents
+          {t('filters.answer.scrollHint')}
         </span>
       </div>
     </div>

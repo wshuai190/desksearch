@@ -1,23 +1,31 @@
 import type { IndexStatus } from '../types';
+import { useI18n } from '../i18n';
 
-function formatLastIndexed(dateStr: string | null): string {
+function formatLastIndexed(
+  dateStr: string | null,
+  t: (key: string, params?: Record<string, string | number> & { count?: number }) => string,
+  formatDate: (value: string | number | Date, options?: Intl.DateTimeFormatOptions) => string,
+): string {
   if (!dateStr) return '';
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffMin = Math.floor(diffMs / 60000);
 
-  if (diffMin < 1) return 'Updated just now';
-  if (diffMin < 60) return `Updated ${diffMin}m ago`;
+  if (diffMin < 1) return t('results.updatedJustNow');
+  if (diffMin < 60) return t('results.updatedMinutesAgo', { count: diffMin });
   const diffHrs = Math.floor(diffMin / 60);
-  if (diffHrs < 24) return `Updated ${diffHrs}h ago`;
-  return `Updated ${date.toLocaleDateString()}`;
+  if (diffHrs < 24) return t('results.updatedHoursAgo', { count: diffHrs });
+  return t('results.updatedOn', { date: formatDate(date) });
 }
 
-function formatFileCount(n: number): string {
-  if (n === 0) return 'No files indexed yet';
-  if (n === 1) return '1 file ready';
-  return `${n.toLocaleString()} files ready`;
+function formatFileCount(
+  n: number,
+  t: (key: string, params?: Record<string, string | number> & { count?: number }) => string,
+  formatNumber: (value: number) => string,
+): string {
+  if (n === 0) return t('results.noFilesIndexed');
+  return `${formatNumber(n)} ${t(n === 1 ? 'results.filesReadyLabel_one' : 'results.filesReadyLabel', { count: n })}`;
 }
 
 interface StatusBarProps {
@@ -26,6 +34,8 @@ interface StatusBarProps {
 }
 
 export default function StatusBar({ status, error }: StatusBarProps) {
+  const { t, formatNumber, formatDate } = useI18n();
+
   // Error state
   if (error) {
     return (
@@ -34,16 +44,16 @@ export default function StatusBar({ status, error }: StatusBarProps) {
           <div className="max-w-5xl mx-auto flex items-center gap-2.5">
             <div className="w-2 h-2 rounded-full bg-red-500 flex-shrink-0" />
             <span className="text-xs text-red-600 dark:text-red-400 font-medium">
-              DeskSearch isn't running
+              {t('results.notRunning')}
             </span>
             <span className="text-xs text-red-400 dark:text-red-500">
-              &mdash; Open the DeskSearch app and try again
+              {t('results.notRunningHint')}
             </span>
           </div>
         </div>
         <div className="sm:hidden mx-3 mb-1 px-3 py-2 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/50 rounded-lg flex items-center gap-2">
           <div className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />
-          <span className="text-xs text-red-600 dark:text-red-400">DeskSearch isn't running</span>
+          <span className="text-xs text-red-600 dark:text-red-400">{t('results.notRunning')}</span>
         </div>
       </>
     );
@@ -53,7 +63,7 @@ export default function StatusBar({ status, error }: StatusBarProps) {
 
   const isIndexing = status.is_indexing;
   const fileCount = status.total_documents;
-  const lastIndexed = formatLastIndexed(status.last_indexed);
+  const lastIndexed = formatLastIndexed(status.last_indexed, t, formatDate);
 
   return (
     <>
@@ -70,13 +80,13 @@ export default function StatusBar({ status, error }: StatusBarProps) {
                   ? 'text-amber-600 dark:text-amber-400'
                   : 'text-emerald-600 dark:text-emerald-400'
               }`}>
-                {isIndexing ? 'Reading files...' : formatFileCount(fileCount)}
+                {isIndexing ? t('results.readingFiles') : formatFileCount(fileCount, t, formatNumber)}
               </span>
             </div>
 
             {isIndexing && fileCount > 0 && (
               <span className="text-gray-400 dark:text-gray-500 tabular-nums">
-                {fileCount.toLocaleString()} done so far
+                {t('results.doneSoFar', { count: fileCount })}
               </span>
             )}
           </div>
@@ -95,8 +105,10 @@ export default function StatusBar({ status, error }: StatusBarProps) {
           }`} />
           <span className="text-xs text-gray-500 dark:text-gray-400">
             {isIndexing
-              ? `Reading your files... ${fileCount > 0 ? `${fileCount.toLocaleString()} done` : ''}`
-              : 'No files indexed yet \u2014 add a folder to get started'}
+              ? (fileCount > 0
+                ? <>{t('results.readingYourFiles')} {t('results.doneCount', { count: fileCount })}</>
+                : t('results.readingYourFiles'))
+              : t('results.noFilesIndexedHint')}
           </span>
         </div>
       )}

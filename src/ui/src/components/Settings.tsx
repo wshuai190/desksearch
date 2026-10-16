@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
+import LanguageToggle from './LanguageToggle';
 import type { SettingsData } from '../types';
 
 // ── Section header ────────────────────────────────────────────────────────────
@@ -39,16 +41,16 @@ function SettingRow({ label, description, children, last = false }: {
 const SPEED_TIERS = [
   {
     id: 'fast',
-    name: 'Fast',
-    description: 'Smaller chunks, quicker indexing',
+    titleKey: 'settings.speed.fast.title',
+    descriptionKey: 'settings.speed.fast.description',
     icon: '⚡',
     chunkSize: 256,
     chunkOverlap: 32,
   },
   {
     id: 'balanced',
-    name: 'Balanced',
-    description: 'Best for most use cases',
+    titleKey: 'settings.speed.balanced.title',
+    descriptionKey: 'settings.speed.balanced.description',
     icon: '⚖️',
     chunkSize: 512,
     chunkOverlap: 64,
@@ -56,8 +58,8 @@ const SPEED_TIERS = [
   },
   {
     id: 'thorough',
-    name: 'Thorough',
-    description: 'Larger chunks, better context',
+    titleKey: 'settings.speed.thorough.title',
+    descriptionKey: 'settings.speed.thorough.description',
     icon: '🔬',
     chunkSize: 1024,
     chunkOverlap: 128,
@@ -68,7 +70,8 @@ function SpeedTierSelector({ chunkSize, onChange }: {
   chunkSize: number;
   onChange: (chunkSize: number, chunkOverlap: number) => void;
 }) {
-  const currentTier = SPEED_TIERS.find(t => t.chunkSize === chunkSize)?.id || 'custom';
+  const { t, formatNumber } = useI18n();
+  const currentTier = SPEED_TIERS.find((tier) => tier.chunkSize === chunkSize)?.id || 'custom';
 
   return (
     <div className="grid grid-cols-3 gap-3 px-6 pb-5">
@@ -82,14 +85,17 @@ function SpeedTierSelector({ chunkSize, onChange }: {
           >
             {tier.recommended && (
               <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[10px] px-2 py-0.5 bg-accent-blue text-white rounded-full font-medium">
-                Recommended
+                {t('settings.speed.recommended')}
               </span>
             )}
             <div className="text-xl mb-2">{tier.icon}</div>
-            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{tier.name}</div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{tier.description}</div>
+            <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{t(tier.titleKey)}</div>
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t(tier.descriptionKey)}</div>
             <div className="text-[10px] text-gray-400 dark:text-gray-500 mt-2 font-mono">
-              {tier.chunkSize} chars · {tier.chunkOverlap} overlap
+              {t('settings.speed.meta', {
+                chars: formatNumber(tier.chunkSize),
+                overlap: formatNumber(tier.chunkOverlap),
+              })}
             </div>
           </button>
         );
@@ -100,6 +106,7 @@ function SpeedTierSelector({ chunkSize, onChange }: {
 
 // ── QR Code for mobile access ─────────────────────────────────────────────────
 function MobileAccessCard({ settings }: { settings: SettingsData }) {
+  const { t } = useI18n();
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -126,8 +133,8 @@ function MobileAccessCard({ settings }: { settings: SettingsData }) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
           </svg>
         }
-        title="Mobile Access"
-        description="Search your files from your phone"
+        title={t('settings.mobile.title')}
+        description={t('settings.mobile.description')}
       />
 
       <div className="px-6 pb-6">
@@ -137,7 +144,7 @@ function MobileAccessCard({ settings }: { settings: SettingsData }) {
               {qrUrl ? (
                 <img
                   src={qrUrl}
-                  alt="QR code to open DeskSearch on your phone"
+                  alt={t('settings.mobile.qrAlt')}
                   className="w-32 h-32 rounded-xl border border-gray-200 dark:border-dark-border"
                   onError={() => setQrUrl(null)}
                 />
@@ -147,17 +154,17 @@ function MobileAccessCard({ settings }: { settings: SettingsData }) {
             </div>
             <div className="space-y-2 text-center sm:text-left">
               <p className="text-sm text-gray-700 dark:text-gray-300 font-medium">
-                Scan with your phone's camera
+                {t('settings.mobile.scanHint')}
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
-                Your phone needs to be on the same Wi-Fi network.
+                {t('settings.mobile.sameWifi')}
               </p>
               <div className="inline-flex items-center gap-2 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg">
                 <span className="text-xs font-mono text-gray-700 dark:text-gray-200 break-all">{lanUrl}</span>
                 <button
                   onClick={() => navigator.clipboard.writeText(lanUrl)}
                   className="text-gray-400 hover:text-accent-blue transition-colors flex-shrink-0"
-                  title="Copy URL"
+                  title={t('settings.mobile.copyUrl')}
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
@@ -169,20 +176,20 @@ function MobileAccessCard({ settings }: { settings: SettingsData }) {
         ) : (
           <div className="space-y-3">
             <p className="text-sm text-gray-600 dark:text-gray-400">
-              You're accessing DeskSearch from <strong>localhost</strong>. To use on your phone:
+              {t('settings.mobile.localhostPrefix')}<strong>localhost</strong>{t('settings.mobile.localhostSuffix')}
             </p>
             <ol className="space-y-2 text-sm text-gray-600 dark:text-gray-400">
               <li className="flex items-start gap-2">
                 <span className="w-5 h-5 rounded-full bg-accent-blue/10 text-accent-blue text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">1</span>
-                <span>Make sure your phone is on the <strong>same Wi-Fi</strong></span>
+                <span>{t('settings.mobile.step1Prefix')}<strong>{t('settings.mobile.step1Strong')}</strong></span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="w-5 h-5 rounded-full bg-accent-blue/10 text-accent-blue text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">2</span>
-                <span>Find your computer's IP (usually 192.168…)</span>
+                <span>{t('settings.mobile.step2')}</span>
               </li>
               <li className="flex items-start gap-2">
                 <span className="w-5 h-5 rounded-full bg-accent-blue/10 text-accent-blue text-xs flex items-center justify-center flex-shrink-0 mt-0.5 font-semibold">3</span>
-                <span>Open: <code className="bg-gray-100 dark:bg-dark-hover px-1.5 py-0.5 rounded font-mono text-xs">{serverAddress}</code></span>
+                <span>{t('settings.mobile.step3Prefix')}<code className="bg-gray-100 dark:bg-dark-hover px-1.5 py-0.5 rounded font-mono text-xs">{serverAddress}</code></span>
               </li>
             </ol>
           </div>
@@ -194,20 +201,21 @@ function MobileAccessCard({ settings }: { settings: SettingsData }) {
 
 // ── File type selector ────────────────────────────────────────────────────────
 const COMMON_TYPES = [
-  { ext: '.pdf',  label: 'PDFs',          icon: '📄' },
-  { ext: '.docx', label: 'Word documents', icon: '📄' },
-  { ext: '.txt',  label: 'Text files',     icon: '📝' },
-  { ext: '.md',   label: 'Notes (Markdown)', icon: '📝' },
-  { ext: '.xlsx', label: 'Spreadsheets',   icon: '📊' },
-  { ext: '.csv',  label: 'CSV data',       icon: '📊' },
-  { ext: '.py',   label: 'Python scripts', icon: '🐍' },
-  { ext: '.ipynb', label: 'Notebooks',     icon: '📓' },
-  { ext: '.eml',  label: 'Emails',         icon: '✉️' },
-  { ext: '.html', label: 'Web pages',      icon: '🌐' },
+  { ext: '.pdf',  labelKey: 'settings.types.pdfs',         icon: '📄' },
+  { ext: '.docx', labelKey: 'settings.types.word',         icon: '📄' },
+  { ext: '.txt',  labelKey: 'settings.types.text',         icon: '📝' },
+  { ext: '.md',   labelKey: 'settings.types.markdown',     icon: '📝' },
+  { ext: '.xlsx', labelKey: 'settings.types.spreadsheets', icon: '📊' },
+  { ext: '.csv',  labelKey: 'settings.types.csv',          icon: '📊' },
+  { ext: '.py',   labelKey: 'settings.types.python',       icon: '🐍' },
+  { ext: '.ipynb', labelKey: 'settings.types.notebooks',   icon: '📓' },
+  { ext: '.eml',  labelKey: 'settings.types.emails',       icon: '✉️' },
+  { ext: '.html', labelKey: 'settings.types.web',          icon: '🌐' },
 ];
 
 // ── Main Settings ─────────────────────────────────────────────────────────────
 export default function Settings() {
+  const { t } = useI18n();
   const [settings, setSettings] = useState<SettingsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -234,7 +242,7 @@ export default function Settings() {
           setMaxFileSize(String(data.max_file_size_mb));
           setExcludedDirs(data.excluded_dirs.join(', '));
           setFileExtensions(data.file_extensions);
-          const commonExts = COMMON_TYPES.map(t => t.ext);
+          const commonExts = COMMON_TYPES.map(entry => entry.ext);
           const custom = data.file_extensions.filter(e => !commonExts.includes(e));
           setCustomExtensions(custom.join(', '));
         }
@@ -261,8 +269,8 @@ export default function Settings() {
       const allExtensions = [...fileExtensions];
       if (customExtensions.trim()) {
         const customs = customExtensions.split(',').map(s => {
-          const t = s.trim();
-          return t.startsWith('.') ? t : `.${t}`;
+          const trimmed = s.trim();
+          return trimmed.startsWith('.') ? trimmed : `.${trimmed}`;
         }).filter(Boolean);
         customs.forEach(e => { if (!allExtensions.includes(e)) allExtensions.push(e); });
       }
@@ -288,14 +296,14 @@ export default function Settings() {
       if (res.ok) {
         const data = await res.json();
         setSettings(data);
-        setMessage({ type: 'success', text: 'Settings saved! Re-index your folders for changes to take effect.' });
+        setMessage({ type: 'success', text: t('settings.saved') });
         setTimeout(() => setMessage(null), 5000);
       } else {
         const err = await res.json();
-        setMessage({ type: 'error', text: err.detail || 'Couldn\'t save — please try again.' });
+        setMessage({ type: 'error', text: err.detail || t('settings.saveFailed') });
       }
     } catch {
-      setMessage({ type: 'error', text: 'Couldn\'t connect to DeskSearch. Is the app running?' });
+      setMessage({ type: 'error', text: t('settings.connectionError') });
     } finally {
       setSaving(false);
     }
@@ -322,7 +330,7 @@ export default function Settings() {
           </svg>
         </div>
         <p className="text-gray-600 dark:text-gray-400 text-center">
-          Couldn't load settings. Make sure DeskSearch is running.
+          {t('settings.loadFailed')}
         </p>
       </div>
     );
@@ -332,9 +340,9 @@ export default function Settings() {
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6 pb-12 page-enter">
       {/* Page header */}
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">Settings</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white tracking-tight">{t('settings.title')}</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Configure how DeskSearch indexes and searches your files.
+          {t('settings.subtitle')}
         </p>
       </div>
 
@@ -358,23 +366,26 @@ export default function Settings() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           }
-          title="General"
-          description="Basic configuration for your DeskSearch instance"
+          title={t('settings.general.title')}
+          description={t('settings.general.description')}
         />
-        <SettingRow label="Embedding Model" description="Powered by Starbucks 2D Matryoshka embeddings — a research-backed model enabling flexible layer × dimension truncation (ECIR 2026)">
+        <SettingRow label={t('settings.general.embeddingModel')} description={t('settings.general.embeddingModelDescription')}>
           <a href="https://arxiv.org/abs/2410.13230" target="_blank" rel="noopener noreferrer" className="text-sm font-mono text-accent-blue hover:underline bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg">
             {settings.embedding_model}
           </a>
         </SettingRow>
-        <SettingRow label="Storage Location" description="Where DeskSearch keeps its index">
+        <SettingRow label={t('settings.general.storageLocation')} description={t('settings.general.storageLocationDescription')}>
           <span className="text-xs font-mono text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg max-w-[200px] truncate block" title={settings.data_dir}>
             {settings.data_dir}
           </span>
         </SettingRow>
-        <SettingRow label="Server Address" description="Network address DeskSearch listens on" last>
+        <SettingRow label={t('settings.general.serverAddress')} description={t('settings.general.serverAddressDescription')}>
           <span className="text-sm font-mono text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-hover px-3 py-1.5 rounded-lg">
             {settings.host}:{settings.port}
           </span>
+        </SettingRow>
+        <SettingRow label={t('common.language')} description={t('settings.general.languageDescription')} last>
+          <LanguageToggle variant="row" showLabel />
         </SettingRow>
       </div>
 
@@ -386,14 +397,14 @@ export default function Settings() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
             </svg>
           }
-          title="Indexing"
-          description="Control what and how DeskSearch processes your files"
+          title={t('settings.indexing.title')}
+          description={t('settings.indexing.description')}
         />
 
         {/* Speed tier selector */}
         <div className="px-6 pb-2">
-          <div className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Indexing Strategy</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500 mb-3">Choose how DeskSearch splits your files for searching</div>
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">{t('settings.indexing.strategy')}</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500 mb-3">{t('settings.indexing.strategyDescription')}</div>
         </div>
         <SpeedTierSelector
           chunkSize={chunkSize}
@@ -402,11 +413,11 @@ export default function Settings() {
 
         {/* File types */}
         <div className="px-6 pb-2 border-t border-gray-100 dark:border-dark-border pt-5">
-          <div className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">File Types</div>
-          <div className="text-xs text-gray-400 dark:text-gray-500 mb-3">Select which file types to include in the index</div>
+          <div className="text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">{t('settings.indexing.fileTypes')}</div>
+          <div className="text-xs text-gray-400 dark:text-gray-500 mb-3">{t('settings.indexing.fileTypesDescription')}</div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 px-6 pb-4">
-          {COMMON_TYPES.map(({ ext, label, icon }) => {
+          {COMMON_TYPES.map(({ ext, labelKey, icon }) => {
             const checked = fileExtensions.includes(ext);
             return (
               <label
@@ -425,7 +436,7 @@ export default function Settings() {
                 />
                 <span className="text-lg flex-shrink-0">{icon}</span>
                 <div className="min-w-0">
-                  <div className="text-sm font-medium text-gray-700 dark:text-gray-200">{label}</div>
+                  <div className="text-sm font-medium text-gray-700 dark:text-gray-200">{t(labelKey)}</div>
                   <div className="text-xs text-gray-400 font-mono">{ext}</div>
                 </div>
               </label>
@@ -436,16 +447,16 @@ export default function Settings() {
         {/* Custom types */}
         <div className="px-6 pb-5">
           <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-            Additional file types
+            {t('settings.indexing.additionalTypes')}
           </label>
           <input
             type="text"
             value={customExtensions}
             onChange={(e) => setCustomExtensions(e.target.value)}
-            placeholder="e.g. .rs, .toml, .r"
+            placeholder={t('settings.indexing.additionalTypesPlaceholder')}
             className="w-full px-3 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-accent-blue/50 font-mono"
           />
-          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">Separate with commas</p>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">{t('settings.indexing.separateWithCommas')}</p>
         </div>
       </div>
 
@@ -457,10 +468,10 @@ export default function Settings() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
           }
-          title="Search"
-          description="Fine-tune search behavior and file limits"
+          title={t('common.search')}
+          description={t('settings.search.description')}
         />
-        <SettingRow label="Max File Size" description="Files larger than this are skipped during indexing">
+        <SettingRow label={t('settings.search.maxFileSize')} description={t('settings.search.maxFileSizeDescription')}>
           <div className="relative">
             <input
               type="text"
@@ -471,7 +482,7 @@ export default function Settings() {
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">MB</span>
           </div>
         </SettingRow>
-        <SettingRow label="Excluded Folders" description="Folder names to skip (e.g. .git, node_modules)" last>
+        <SettingRow label={t('settings.search.excludedFolders')} description={t('settings.search.excludedFoldersDescription')} last>
           <input
             type="text"
             value={excludedDirs}
@@ -488,7 +499,7 @@ export default function Settings() {
       {/* ── Save button ──────────────────────────────────────────── */}
       <div className="flex items-center justify-between pt-2 pb-4">
         <p className="text-xs text-gray-400 dark:text-gray-500">
-          Changes require re-indexing to take effect.
+          {t('settings.footer.hint')}
         </p>
         <button
           onClick={save}
@@ -501,14 +512,14 @@ export default function Settings() {
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
               </svg>
-              Saving…
+              {t('common.saving')}
             </>
           ) : (
             <>
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7"/>
               </svg>
-              Save Settings
+              {t('settings.saveButton')}
             </>
           )}
         </button>

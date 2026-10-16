@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 import type { ConnectorInfo, ConnectorSyncResult } from '../types';
 
 const CONNECTOR_ICONS: Record<string, string> = {
@@ -10,22 +11,37 @@ const CONNECTOR_ICONS: Record<string, string> = {
   'slack-export': '💬',
 };
 
-const CONNECTOR_CONFIG_FIELDS: Record<string, { label: string; key: string; type: 'text' | 'textarea'; placeholder: string; help?: string }[]> = {
+/**
+ * Declarative connector form fields. Label/placeholder/help hold i18n keys
+ * (bare, relative to the `panels.sources` sub-namespace); they are resolved
+ * with `t()` at render time so a language switch is reflected immediately.
+ */
+interface ConfigField {
+  /** i18n key suffix, resolved as `panels.sources.<key>Label` etc. */
+  key: string;
+  type: 'text' | 'textarea';
+  /** Field label i18n key (full, extension-less). */
+  labelKey: string;
+  placeholderKey: string;
+  helpKey?: string;
+}
+
+const CONNECTOR_CONFIG_FIELDS: Record<string, ConfigField[]> = {
   'email-connector': [
-    { label: 'Email directories', key: 'directories', type: 'textarea', placeholder: '/path/to/emails\n/path/to/mbox-files', help: 'One directory per line containing .eml or .mbox files' },
+    { labelKey: 'emailDirsLabel', key: 'directories', type: 'textarea', placeholderKey: 'emailDirsPlaceholder', helpKey: 'emailDirsHelp' },
   ],
   'local-files': [
-    { label: 'Directories to scan', key: 'directories', type: 'textarea', placeholder: '/path/to/documents\n/path/to/notes', help: 'One directory per line' },
-    { label: 'File extensions', key: 'extensions', type: 'text', placeholder: '.txt, .md, .pdf', help: 'Comma-separated (leave empty for defaults)' },
-    { label: 'Max file size (MB)', key: 'max_file_size_mb', type: 'text', placeholder: '50' },
+    { labelKey: 'dirsLabel', key: 'directories', type: 'textarea', placeholderKey: 'dirsPlaceholder', helpKey: 'dirsHelp' },
+    { labelKey: 'extensionsLabel', key: 'extensions', type: 'text', placeholderKey: 'extensionsPlaceholder', helpKey: 'extensionsHelp' },
+    { labelKey: 'maxFileSizeLabel', key: 'max_file_size_mb', type: 'text', placeholderKey: 'maxFileSizePlaceholder' },
   ],
   'slack-export': [
-    { label: 'Export path', key: 'export_path', type: 'text', placeholder: '/path/to/slack-export or /path/to/export.zip', help: 'Path to extracted Slack export directory or ZIP file' },
-    { label: 'Include bot messages', key: 'include_bots', type: 'text', placeholder: 'false', help: 'Set to "true" to include bot messages' },
+    { labelKey: 'exportPathLabel', key: 'export_path', type: 'text', placeholderKey: 'exportPathPlaceholder', helpKey: 'exportPathHelp' },
+    { labelKey: 'includeBotsLabel', key: 'include_bots', type: 'text', placeholderKey: 'includeBotsPlaceholder', helpKey: 'includeBotsHelp' },
   ],
   'browser-bookmarks': [
-    { label: 'Chrome bookmarks path', key: 'chrome_bookmarks', type: 'text', placeholder: '(auto-detected)', help: 'Override the default Chrome bookmarks path' },
-    { label: 'Firefox places path', key: 'firefox_places', type: 'text', placeholder: '(auto-detected)', help: 'Override the default Firefox places.sqlite path' },
+    { labelKey: 'chromeBookmarksLabel', key: 'chrome_bookmarks', type: 'text', placeholderKey: 'chromeBookmarksPlaceholder', helpKey: 'chromeBookmarksHelp' },
+    { labelKey: 'firefoxPlacesLabel', key: 'firefox_places', type: 'text', placeholderKey: 'firefoxPlacesPlaceholder', helpKey: 'firefoxPlacesHelp' },
   ],
 };
 
@@ -43,6 +59,7 @@ function ConnectorCard({
   const [syncResult, setSyncResult] = useState<ConnectorSyncResult | null>(null);
   const [saving, setSaving] = useState(false);
   const [configDraft, setConfigDraft] = useState<Record<string, string>>({});
+  const { t } = useI18n();
 
   const icon = CONNECTOR_ICONS[connector.name] || '🔌';
   const fields = CONNECTOR_CONFIG_FIELDS[connector.name] || [];
@@ -115,7 +132,7 @@ function ConnectorCard({
             <span className="text-[10px] font-mono text-gray-400">v{connector.version}</span>
             {connector.configured && (
               <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 font-medium">
-                Configured
+                {t('panels.sources.configured')}
               </span>
             )}
           </div>
@@ -131,9 +148,9 @@ function ConnectorCard({
             className="tap-sm flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50 transition-colors font-medium"
           >
             {syncing ? (
-              <><svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> Syncing…</>
+              <><svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg> {t('panels.sources.syncing')}</>
             ) : (
-              <><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> Sync</>
+              <><svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg> {t('panels.sources.sync')}</>
             )}
           </button>
           <svg className={`w-4 h-4 text-gray-400 transition-transform ${expanded ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -150,8 +167,11 @@ function ConnectorCard({
             : 'bg-green-50 dark:bg-green-950/30 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800/40'
         }`}>
           {syncResult.documents_found === 0
-            ? 'No documents found. Check the connector configuration.'
-            : `Found ${syncResult.documents_found} documents, indexed ${syncResult.documents_indexed}${syncResult.errors > 0 ? `, ${syncResult.errors} errors` : ''}`
+            ? t('panels.sources.noDocumentsFound')
+            : t('panels.sources.syncResult', {
+                found: syncResult.documents_found,
+                indexed: syncResult.documents_indexed,
+              }) + (syncResult.errors > 0 ? t('panels.sources.syncErrors', { count: syncResult.errors }) : '')
           }
         </div>
       )}
@@ -161,13 +181,13 @@ function ConnectorCard({
         <div className="px-4 pb-4 pt-1 border-t border-gray-100 dark:border-dark-border space-y-3 animate-slideDown">
           {fields.map((field) => (
             <div key={field.key}>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{field.label}</label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">{t(`panels.sources.${field.labelKey}`)}</label>
               {field.type === 'textarea' ? (
                 <textarea
                   value={configDraft[field.key] || ''}
                   onChange={(e) => setConfigDraft({ ...configDraft, [field.key]: e.target.value })}
                   rows={3}
-                  placeholder={field.placeholder}
+                  placeholder={t(`panels.sources.${field.placeholderKey}`)}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent-blue/50 font-mono resize-none"
                 />
               ) : (
@@ -175,11 +195,11 @@ function ConnectorCard({
                   type="text"
                   value={configDraft[field.key] || ''}
                   onChange={(e) => setConfigDraft({ ...configDraft, [field.key]: e.target.value })}
-                  placeholder={field.placeholder}
+                  placeholder={t(`panels.sources.${field.placeholderKey}`)}
                   className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-bg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-accent-blue/50 font-mono"
                 />
               )}
-              {field.help && <p className="text-[11px] text-gray-400 mt-1">{field.help}</p>}
+              {field.helpKey && <p className="text-[11px] text-gray-400 mt-1">{t(`panels.sources.${field.helpKey}`)}</p>}
             </div>
           ))}
 
@@ -188,7 +208,7 @@ function ConnectorCard({
             disabled={saving}
             className="tap-sm flex items-center gap-1.5 px-4 py-2 text-xs rounded-lg bg-accent-blue text-white hover:bg-accent-blue-hover disabled:opacity-50 transition-colors font-medium"
           >
-            {saving ? 'Saving…' : '💾 Save Configuration'}
+            {saving ? t('common.saving') : t('panels.sources.saveConfig')}
           </button>
         </div>
       )}
@@ -196,7 +216,7 @@ function ConnectorCard({
       {expanded && fields.length === 0 && (
         <div className="px-4 pb-4 pt-1 border-t border-gray-100 dark:border-dark-border">
           <p className="text-xs text-gray-400 dark:text-gray-500 italic">
-            This connector works automatically with no configuration needed.
+            {t('panels.sources.noConfigNeeded')}
           </p>
         </div>
       )}
@@ -205,6 +225,7 @@ function ConnectorCard({
 }
 
 export default function DataSources() {
+  const { t } = useI18n();
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -275,9 +296,9 @@ export default function DataSources() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-6 space-y-5 pb-10">
       <div>
-        <h2 className="text-xl font-bold text-gray-900 dark:text-white">Data Sources</h2>
+        <h2 className="text-xl font-bold text-gray-900 dark:text-white">{t('panels.sources.title')}</h2>
         <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-          Connect external data sources to make them searchable alongside your local files.
+          {t('panels.sources.subtitle')}
         </p>
       </div>
 
@@ -285,8 +306,9 @@ export default function DataSources() {
       <div className="text-sm px-4 py-3 rounded-xl bg-accent-blue/5 dark:bg-accent-blue/10 border border-accent-blue/20 text-gray-600 dark:text-gray-300 flex items-start gap-2">
         <span>💡</span>
         <span>
-          Configure a data source, then click <strong>Sync</strong> to import its content into your search index.
-          You can sync at any time to pull in new data.
+          {t('panels.sources.infoLead')}
+          <strong>{t('panels.sources.infoSyncLabel')}</strong>
+          {t('panels.sources.infoTail')}
         </span>
       </div>
 
@@ -304,7 +326,7 @@ export default function DataSources() {
 
       {connectors.length === 0 && (
         <div className="text-center py-12">
-          <p className="text-gray-400 dark:text-gray-500">No connectors available.</p>
+          <p className="text-gray-400 dark:text-gray-500">{t('panels.sources.noneAvailable')}</p>
         </div>
       )}
     </div>

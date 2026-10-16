@@ -13,6 +13,8 @@ build/
 # Node
 node_modules/
 src/ui/dist/
+# scratch file produced by `npm run check:i18n`
+src/ui/.tmp-check-i18n.cjs
 
 # IDE
 .idea/

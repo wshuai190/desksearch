@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { RichSearchResult, RelatedDoc } from '../types';
 import { API_BASE_URL } from '../config';
+import { useI18n } from '../i18n';
 import DocumentPreviewPanel from './DocumentPreviewPanel';
 
 // ── File type icon with colored badge ───────────────────────────────────────
@@ -52,30 +53,38 @@ function FileTypeIcon({ type }: { type: string }) {
   );
 }
 
-function getScoreLabel(score: number): { label: string; className: string; icon: string } {
-  if (score >= 0.8) return { label: 'Excellent', className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20', icon: 'M5 13l4 4L19 7' };
-  if (score >= 0.5) return { label: 'Good', className: 'bg-accent-blue/10 text-accent-blue ring-1 ring-accent-blue/20', icon: 'M5 13l4 4L19 7' };
-  return { label: 'Partial', className: 'bg-gray-500/10 text-gray-500 dark:text-gray-400 ring-1 ring-gray-500/20', icon: 'M20 12H4' };
+/** `labelKey` is a full i18n key; translated at render time. */
+function getScoreLabel(score: number): { labelKey: string; className: string; icon: string } {
+  if (score >= 0.8) return { labelKey: 'results.scoreExcellent', className: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-1 ring-emerald-500/20', icon: 'M5 13l4 4L19 7' };
+  if (score >= 0.5) return { labelKey: 'results.scoreGood', className: 'bg-accent-blue/10 text-accent-blue ring-1 ring-accent-blue/20', icon: 'M5 13l4 4L19 7' };
+  return { labelKey: 'results.scorePartial', className: 'bg-gray-500/10 text-gray-500 dark:text-gray-400 ring-1 ring-gray-500/20', icon: 'M20 12H4' };
 }
 
-function formatDate(dateStr: string | null): string {
+function formatRelativeDate(
+  dateStr: string | null,
+  t: (key: string, params?: { count?: number }) => string,
+  formatDate: (value: string | number | Date, options?: Intl.DateTimeFormatOptions) => string,
+): string {
   if (!dateStr) return '';
   const date = new Date(dateStr);
   const now = new Date();
   const diffDays = Math.floor((now.getTime() - date.getTime()) / 86400000);
-  if (diffDays === 0) return 'Today';
-  if (diffDays === 1) return 'Yesterday';
-  if (diffDays < 7) return `${diffDays}d ago`;
-  if (diffDays < 30) return `${Math.floor(diffDays / 7)}w ago`;
-  if (diffDays < 365) return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  if (diffDays === 0) return t('common.today');
+  if (diffDays === 1) return t('common.yesterday');
+  if (diffDays < 7) return t('results.daysAgo', { count: diffDays });
+  if (diffDays < 30) return t('results.weeksAgo', { count: diffDays / 7 });
+  if (diffDays < 365) return formatDate(date, { month: 'short', day: 'numeric' });
+  return formatDate(date, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-function formatSize(bytes?: number): string | null {
+function formatSize(
+  bytes: number | undefined,
+  formatNumber: (value: number) => string,
+): string | null {
   if (!bytes) return null;
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1048576).toFixed(1)} MB`;
+  if (bytes < 1024) return `${formatNumber(bytes)} B`;
+  if (bytes < 1048576) return `${formatNumber(bytes / 1024)} KB`;
+  return `${formatNumber(bytes / 1048576)} MB`;
 }
 
 function shortenPath(path: string): string {
@@ -98,6 +107,7 @@ function highlightSnippet(snippet: string, query: string): string {
 
 // Related docs mini-list
 function RelatedDocs({ docs, onOpen }: { docs: RelatedDoc[]; onOpen: (path: string) => void }) {
+  const { t } = useI18n();
   if (!docs || docs.length === 0) return null;
   return (
     <div className="mt-3 pt-3 border-t border-gray-100 dark:border-dark-border">
@@ -105,7 +115,7 @@ function RelatedDocs({ docs, onOpen }: { docs: RelatedDoc[]; onOpen: (path: stri
         <svg className="w-3 h-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
         </svg>
-        <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Similar</span>
+        <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">{t('results.similar')}</span>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {docs.slice(0, 3).map(doc => (
@@ -113,7 +123,7 @@ function RelatedDocs({ docs, onOpen }: { docs: RelatedDoc[]; onOpen: (path: stri
             key={doc.doc_id}
             onClick={(e) => { e.stopPropagation(); onOpen(doc.path); }}
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 bg-gray-50 dark:bg-dark-hover border border-gray-100 dark:border-dark-border rounded-lg hover:border-accent-blue/40 hover:text-accent-blue transition-all duration-150 text-gray-500 dark:text-gray-400 max-w-[200px]"
-            title={`${doc.filename} (${Math.round(doc.similarity * 100)}% similar)`}
+            title={t('results.similarTitle', { filename: doc.filename, percent: Math.round(doc.similarity * 100) })}
           >
             <span className="truncate">{doc.filename}</span>
             <span className="flex-shrink-0 text-[10px] text-gray-400 dark:text-gray-500 tabular-nums">{Math.round(doc.similarity * 100)}%</span>
@@ -134,9 +144,10 @@ interface ResultCardProps {
 export default function ResultCard({ result, query, focused = false, onOpen }: ResultCardProps) {
   const [copied, setCopied] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
-  const { label: scoreLabel, className: scoreClass } = getScoreLabel(result.score);
-  const dateStr = formatDate(result.modified);
-  const sizeStr = formatSize(result.file_size);
+  const { t, formatNumber, formatDate } = useI18n();
+  const { labelKey: scoreLabelKey, className: scoreClass } = getScoreLabel(result.score);
+  const dateStr = formatRelativeDate(result.modified, t, formatDate);
+  const sizeStr = formatSize(result.file_size, formatNumber);
   const highlightedSnippet = highlightSnippet(result.snippet, query);
 
   const docIdNum = typeof result.doc_id === 'string' ? parseInt(result.doc_id, 10) : result.doc_id;
@@ -191,7 +202,7 @@ export default function ResultCard({ result, query, focused = false, onOpen }: R
                 {result.filename}
               </h3>
               <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0 ${scoreClass}`}>
-                {scoreLabel} · {Math.round(result.score * 100)}%
+                {t(scoreLabelKey)} · {formatNumber(Math.round(result.score * 100))}%
               </span>
             </div>
 
@@ -230,13 +241,13 @@ export default function ResultCard({ result, query, focused = false, onOpen }: R
                 <button
                   onClick={handlePreview}
                   className="flex items-center gap-1 text-[11px] text-gray-400 hover:text-accent-blue transition-colors px-2.5 py-1 rounded-lg hover:bg-accent-blue/5"
-                  title="Quick preview"
+                  title={t('results.quickPreview')}
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                   </svg>
-                  Preview
+                  {t('common.preview')}
                 </button>
 
                 <div className="w-px h-3.5 bg-gray-200 dark:bg-dark-border" />
@@ -250,14 +261,14 @@ export default function ResultCard({ result, query, focused = false, onOpen }: R
                       <svg className="w-3 h-3 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                       </svg>
-                      <span className="text-emerald-500">Copied</span>
+                      <span className="text-emerald-500">{t('results.copied')}</span>
                     </>
                   ) : (
                     <>
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
                       </svg>
-                      Copy path
+                      {t('results.copyPath')}
                     </>
                   )}
                 </button>
