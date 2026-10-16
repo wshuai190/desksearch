@@ -156,7 +156,7 @@ def _compute_index_size_mb() -> float:
         p = data_dir / name
         if p.exists():
             total += p.stat().st_size
-    for subdir in ("bm25", "dense", "embeddings"):
+    for subdir in ("dense", "embeddings"):
         d = data_dir / subdir
         if d.exists():
             for root, _, files in os.walk(d):
@@ -165,6 +165,17 @@ def _compute_index_size_mb() -> float:
                         total += (Path(root) / f).stat().st_size
                     except OSError:
                         pass
+    # The BM25 index directory is schema-versioned (bm25-v2, …); count any
+    # BM25 directory so upgraded installs report their real disk usage.
+    for d in list(data_dir.glob("bm25*")):
+        if not d.is_dir():
+            continue
+        for root, _, files in os.walk(d):
+            for f in files:
+                try:
+                    total += (Path(root) / f).stat().st_size
+                except OSError:
+                    pass
     return round(total / (1024 * 1024), 2)
 
 

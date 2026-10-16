@@ -266,7 +266,7 @@ def create_app(
 
 
 def _warm_search_engine(engine, store, config) -> None:
-    """Log index state on startup — no heavy lifting needed.
+    """Log index state on startup, refilling BM25 when it had to be rebuilt.
 
     BM25 (tantivy) and FAISS both persist to disk and reload their data
     automatically in their constructors.  The old implementation re-loaded
@@ -276,9 +276,45 @@ def _warm_search_engine(engine, store, config) -> None:
     We now just log counts so operators can confirm the index is healthy.
     The ``_doc_texts`` LRU cache in the search engine fills on demand as
     searches run, with BM25 as a fallback for cache misses.
+
+    One exception: when a BM25 index written by an older release cannot be
+    opened (schema changed — e.g. the CJK bigram field), ``BM25Index`` moves it
+    aside and sets ``schema_reset``.  SQLite still holds every chunk, so the
+    index is refilled here instead of asking the user to re-index from scratch.
     """
     doc_count = store.document_count()
     chunk_count = store.chunk_count()
+
+    if getattr(engine.bm25, "schema_reset", False) and chunk_count > 0:
+        # Do this on a background thread: refilling a large corpus (100k+ chunks)
+        # takes minutes, and blocking here means uvicorn never binds the port —
+        # the desktop window then has nothing to load. BM25 simply returns no
+        # hits until the refill finishes; dense + SQLite search keep working.
+        import threading
+
+        def _refill() -> None:
+            logger.info("Rebuilding BM25 index from %d stored chunks...", chunk_count)
+            batch: list[tuple[str, str]] = []
+            restored = 0
+            try:
+                for chunk_id, text in store.iter_chunk_texts():
+                    batch.append((str(chunk_id), text or ""))
+                    if len(batch) >= 2000:
+                        engine.bm25.add_documents(batch)
+                        restored += len(batch)
+                        batch.clear()
+                if batch:
+                    engine.bm25.add_documents(batch)
+                    restored += len(batch)
+                logger.info("BM25 index rebuilt: %d chunks", restored)
+            except Exception as exc:
+                logger.error("BM25 rebuild failed after %d chunks: %s", restored, exc)
+            finally:
+                engine.bm25.schema_reset = False
+
+        engine.bm25.schema_reset = False  # claimed — guards against a second run
+        threading.Thread(target=_refill, name="bm25-refill", daemon=True).start()
+
     bm25_docs = engine.bm25.doc_count
     faiss_vecs = engine.dense.doc_count
     logger.info(

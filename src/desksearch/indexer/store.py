@@ -452,6 +452,26 @@ class MetadataStore:
         row = self.conn.execute("SELECT COUNT(*) as cnt FROM chunks").fetchone()
         return row["cnt"]
 
+    def iter_chunk_texts(self, batch_size: int = 2000):
+        """Yield ``(chunk_id, text)`` for every stored chunk, in batches.
+
+        Used to refill a search index from SQLite without re-parsing the source
+        files (e.g. after the BM25 index was rebuilt with a new schema).
+        """
+        offset = 0
+        while True:
+            rows = self.conn.execute(
+                "SELECT id, text FROM chunks ORDER BY id LIMIT ? OFFSET ?",
+                (batch_size, offset),
+            ).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                yield row["id"], row["text"]
+            if len(rows) < batch_size:
+                return
+            offset += batch_size
+
     def get_documents_by_ids(self, doc_ids: list[int]) -> dict[int, DocumentRecord]:
         """Batch-fetch documents by a list of IDs.
 

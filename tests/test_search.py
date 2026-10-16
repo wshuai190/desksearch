@@ -374,3 +374,104 @@ class TestHybridSearchEngine:
     def test_empty_search(self, engine: HybridSearchEngine) -> None:
         results = engine.search_sync("anything", self._random_emb())
         assert results == []
+
+
+# ---------------------------------------------------------------------------
+# CJK (Chinese / Japanese / Korean) BM25 support
+# ---------------------------------------------------------------------------
+
+
+class TestCJKBigrams:
+    """The bigram helper that makes unspaced CJK text searchable."""
+
+    def test_english_is_ignored(self) -> None:
+        from desksearch.core.bm25 import cjk_bigrams
+        assert cjk_bigrams("the quick brown fox") == ""
+
+    def test_bigrams_of_a_chinese_run(self) -> None:
+        from desksearch.core.bm25 import cjk_bigrams
+        assert cjk_bigrams("第三季度营收报告") == "第三 三季 季度 度营 营收 收报 报告"
+
+    def test_single_character_run_is_kept(self) -> None:
+        from desksearch.core.bm25 import cjk_bigrams
+        assert cjk_bigrams("好") == "好"
+
+    def test_mixed_text_keeps_only_cjk(self) -> None:
+        from desksearch.core.bm25 import cjk_bigrams
+        assert cjk_bigrams("番茄 tomato 种植") == "番茄 种植"
+
+
+class TestBM25CJKSearch:
+    """Regression: unspaced Chinese queries used to match nothing at all.
+
+    tantivy's default tokenizer treats a whole Chinese run as one token, so
+    "季度营收" could never match inside "第三季度营收报告" and every Chinese query
+    fell through to the (English-trained) dense index.
+    """
+
+    def test_partial_chinese_query_matches(self, tmp_data_dir: Path) -> None:
+        idx = BM25Index(tmp_data_dir)
+        idx.add_document("caiwu", "第三季度营收报告：营业收入同比增长百分之二十三，毛利率提升。")
+        idx.add_document("shicai", "番茄种植技巧：春季播种，保持土壤湿润，注意阳光充足。")
+
+        results = idx.search("季度营收")
+        assert results, "a shorter Chinese query must match inside a longer run"
+        assert results[0][0] == "caiwu"
+
+    def test_unrelated_chinese_doc_ranks_lower(self, tmp_data_dir: Path) -> None:
+        idx = BM25Index(tmp_data_dir)
+        idx.add_document("caiwu", "第三季度营收报告：营业收入同比增长百分之二十三。")
+        idx.add_document("shicai", "番茄种植技巧：春季播种，保持土壤湿润。")
+
+        scores = dict(idx.search("番茄种植"))
+        assert scores.get("shicai", 0) > scores.get("caiwu", 0)
+
+    def test_english_search_still_works(self, tmp_data_dir: Path) -> None:
+        idx = BM25Index(tmp_data_dir)
+        idx.add_document("doc1", "the quick brown fox jumps over the lazy dog")
+        idx.add_document("doc2", "a fast red car drives on the highway")
+
+        results = idx.search("quick fox")
+        assert results
+        assert results[0][0] == "doc1"
+
+    def test_mixed_script_query(self, tmp_data_dir: Path) -> None:
+        idx = BM25Index(tmp_data_dir)
+        idx.add_document("zh", "番茄种植技巧：春季播种。")
+        idx.add_document("en", "tomato growing tips for spring planting")
+
+        assert dict(idx.search("番茄")).get("zh", 0) > 0
+        assert dict(idx.search("tomato")).get("en", 0) > 0
+
+
+class TestBM25SchemaVersioning:
+    """The index directory is versioned so a schema change never needs an
+    in-place rename (which fails on Windows with WinError 5)."""
+
+    def test_index_dir_is_versioned(self, tmp_data_dir: Path) -> None:
+        from desksearch.core.bm25 import BM25_DIR_NAME, bm25_index_dir
+        idx = BM25Index(tmp_data_dir)
+        assert bm25_index_dir(tmp_data_dir).name == BM25_DIR_NAME
+        assert (tmp_data_dir / BM25_DIR_NAME).is_dir()
+        # A brand-new install has nothing to migrate.
+        assert idx.schema_reset is False
+
+    def test_legacy_index_triggers_refill_flag(self, tmp_data_dir: Path) -> None:
+        from desksearch.core.bm25 import LEGACY_BM25_DIR_NAME
+        # Simulate an install written by an older release.
+        legacy = tmp_data_dir / LEGACY_BM25_DIR_NAME
+        legacy.mkdir(parents=True)
+        (legacy / "meta.json").write_text("{}", encoding="utf-8")
+
+        idx = BM25Index(tmp_data_dir)
+        assert idx.schema_reset is True
+        assert idx.available is True
+
+    def test_existing_versioned_index_is_reused(self, tmp_data_dir: Path) -> None:
+        first = BM25Index(tmp_data_dir)
+        first.add_document("doc1", "第三季度营收报告")
+
+        second = BM25Index(tmp_data_dir)
+        assert second.schema_reset is False
+        assert second.doc_count == 1
+        assert second.search("营收")

@@ -330,6 +330,7 @@ def status(as_json: bool) -> None:
     Displays document count, chunk count, disk usage, watched folders,
     and the current embedding model.
     """
+    from desksearch.core.bm25 import BM25_DIR_NAME
     from desksearch.indexer.store import MetadataStore
     import shutil
 
@@ -344,7 +345,7 @@ def status(as_json: bool) -> None:
     total_bytes = 0
     component_sizes: dict[str, float] = {}
     if config.data_dir.exists():
-        for component in ("dense", "bm25", "metadata.db"):
+        for component in ("dense", BM25_DIR_NAME, "metadata.db"):
             comp_path = config.data_dir / component
             if comp_path.is_dir():
                 sz = sum(f.stat().st_size for f in comp_path.rglob("*") if f.is_file())
@@ -417,6 +418,7 @@ def stats(as_json: bool) -> None:
     Breaks down disk usage by component (FAISS dense index, BM25, SQLite),
     reports FAISS index type, fragmentation, and cache metrics.
     """
+    from desksearch.core.bm25 import bm25_index_dir
     from desksearch.indexer.store import MetadataStore
 
     config = Config.load()
@@ -436,7 +438,7 @@ def stats(as_json: bool) -> None:
     ) if faiss_dir.exists() else 0
     faiss_size_mb = faiss_size_bytes / (1024 * 1024)
 
-    bm25_dir = config.data_dir / "bm25"
+    bm25_dir = bm25_index_dir(config.data_dir)
     bm25_size_bytes = sum(
         f.stat().st_size for f in bm25_dir.rglob("*") if f.is_file()
     ) if bm25_dir.exists() else 0

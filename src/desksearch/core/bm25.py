@@ -35,6 +35,75 @@ except ImportError:  # pragma: no cover
     )
 
 
+# ---------------------------------------------------------------------------
+# CJK support
+# ---------------------------------------------------------------------------
+# tantivy's default tokenizer splits on non-alphanumeric characters, so an
+# unspaced Chinese sentence such as "第三季度营收报告" becomes ONE token and can
+# never match a shorter query like "季度营收" — every Chinese query then falls
+# back to the (noisy) dense index. Indexing the character bigrams of each CJK
+# run is the classic solution: the query is turned into bigrams the same way,
+# so "季度营收" matches inside "第三季度营收报告" (季度/度营/营收 all hit).
+_CJK_RANGES: tuple[tuple[int, int], ...] = (
+    (0x2E80, 0x2EFF),    # CJK radicals
+    (0x3040, 0x30FF),    # Hiragana + Katakana
+    (0x3400, 0x4DBF),    # CJK ext A
+    (0x4E00, 0x9FFF),    # CJK unified
+    (0xAC00, 0xD7AF),    # Hangul syllables
+    (0xF900, 0xFAFF),    # CJK compatibility
+    (0x20000, 0x2FA1F),  # CJK ext B+
+)
+
+
+def _is_cjk(ch: str) -> bool:
+    code = ord(ch)
+    return any(lo <= code <= hi for lo, hi in _CJK_RANGES)
+
+
+def cjk_bigrams(text: str) -> str:
+    """Return space-separated bigrams for every CJK run in *text*.
+
+    Non-CJK text is ignored (it is handled by the normal tokenizer). A CJK run
+    of a single character contributes that character, so one-character queries
+    still work. The result is a plain token string that tantivy's default
+    tokenizer splits correctly.
+    """
+    tokens: list[str] = []
+    run: list[str] = []
+
+    def flush() -> None:
+        if not run:
+            return
+        if len(run) == 1:
+            tokens.append(run[0])
+        else:
+            tokens.extend(run[i] + run[i + 1] for i in range(len(run) - 1))
+        run.clear()
+
+    for ch in text:
+        if _is_cjk(ch):
+            run.append(ch)
+        else:
+            flush()
+    flush()
+    return " ".join(tokens)
+
+
+
+# Bump when the tantivy schema changes: the index moves to a new directory
+# instead of being migrated in place. An in-place rename fails on Windows
+# (""[WinError 5] access denied") because the failed open leaves handles on the
+# old files, which used to disable BM25 for the whole session.
+BM25_SCHEMA_VERSION = 2  # v2 = added body_cjk (CJK bigram support)
+BM25_DIR_NAME = f"bm25-v{BM25_SCHEMA_VERSION}"
+LEGACY_BM25_DIR_NAME = "bm25"
+
+
+def bm25_index_dir(data_dir: Path) -> Path:
+    """Canonical BM25 index directory inside *data_dir*."""
+    return Path(data_dir) / BM25_DIR_NAME
+
+
 class BM25Index:
     """Tantivy-backed BM25 full-text search index.
 
@@ -46,7 +115,8 @@ class BM25Index:
     """
 
     def __init__(self, data_dir: Path) -> None:
-        self._index_dir = data_dir / "bm25"
+        data_dir = Path(data_dir)
+        self._index_dir = bm25_index_dir(data_dir)
         self._index_dir.mkdir(parents=True, exist_ok=True)
 
         # Serialise write operations — tantivy's Python binding doesn't
@@ -60,11 +130,26 @@ class BM25Index:
 
         self.available: bool = _TANTIVY_AVAILABLE
         self._index: Optional[tantivy.Index] = None
+        # True when a fresh index directory was created for a data dir that
+        # already had an older index; _warm_search_engine() refills it from the
+        # SQLite store so no full re-index is needed.
+        self.schema_reset: bool = False
 
         if self.available:
             self._schema = self._build_schema()
+            empty_dir = not any(self._index_dir.iterdir())
+            legacy_exists = (data_dir / LEGACY_BM25_DIR_NAME).is_dir()
             try:
                 self._index = tantivy.Index(self._schema, path=str(self._index_dir))
+                if empty_dir and legacy_exists:
+                    self.schema_reset = True
+                    logger.info(
+                        "BM25 schema upgraded to v%d (%s); the previous index in "
+                        "%s is no longer used and will be refilled from the store.",
+                        BM25_SCHEMA_VERSION,
+                        self._index_dir.name,
+                        LEGACY_BM25_DIR_NAME,
+                    )
             except Exception as exc:
                 logger.error(
                     "Failed to open BM25 index at %s (corrupt?): %s. "
@@ -84,6 +169,8 @@ class BM25Index:
         builder = tantivy.SchemaBuilder()
         builder.add_text_field("doc_id", stored=True)
         builder.add_text_field("body", stored=True)
+        # Bigram tokens for CJK text (indexed only — never stored/displayed).
+        builder.add_text_field("body_cjk")
         return builder.build()
 
     # ------------------------------------------------------------------
@@ -98,7 +185,9 @@ class BM25Index:
             writer = self._index.writer()
             try:
                 writer.delete_documents("doc_id", doc_id)
-                writer.add_document(tantivy.Document(doc_id=doc_id, body=body))
+                writer.add_document(
+                    tantivy.Document(doc_id=doc_id, body=body, body_cjk=cjk_bigrams(body))
+                )
                 writer.commit()
             except Exception as exc:
                 logger.error("BM25 add_document failed for %r: %s", doc_id, exc)
@@ -122,7 +211,9 @@ class BM25Index:
             try:
                 for doc_id, body in docs:
                     writer.delete_documents("doc_id", doc_id)
-                    writer.add_document(tantivy.Document(doc_id=doc_id, body=body))
+                    writer.add_document(
+                        tantivy.Document(doc_id=doc_id, body=body, body_cjk=cjk_bigrams(body))
+                    )
                 writer.commit()
             except Exception as exc:
                 logger.error("BM25 add_documents batch failed: %s", exc)
@@ -188,6 +279,25 @@ class BM25Index:
     # Search
     # ------------------------------------------------------------------
 
+    def _build_query(self, query: str):
+        """Parse *query* into a tantivy Query, adding a CJK bigram branch.
+
+        The raw query is matched against ``body`` (works for Latin scripts and
+        for CJK runs that appear verbatim). When the query contains CJK, its
+        bigrams are additionally matched against ``body_cjk``, which is what
+        makes partial Chinese queries hit.
+        """
+        primary = self._index.parse_query(query, ["body"])
+
+        bigrams = cjk_bigrams(query)
+        if not bigrams:
+            return primary
+
+        cjk_query = self._index.parse_query(bigrams, ["body_cjk"])
+        return tantivy.Query.boolean_query(
+            [(tantivy.Occur.Should, primary), (tantivy.Occur.Should, cjk_query)]
+        )
+
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         """Search the index, returning a list of (doc_id, score) tuples.
 
@@ -203,7 +313,7 @@ class BM25Index:
             searcher = self._index.searcher()
             parsed_query = self._get_cached_query(query)
             if parsed_query is None:
-                parsed_query = self._index.parse_query(query, ["body"])
+                parsed_query = self._build_query(query)
                 self._put_cached_query(query, parsed_query)
             results = searcher.search(parsed_query, top_k).hits
         except Exception as exc:
