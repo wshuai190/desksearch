@@ -28,6 +28,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich import box
 
+from desksearch import __version__
 from desksearch.config import Config
 
 import os as _os
@@ -76,7 +77,7 @@ class _DefaultGroup(click.Group):
 
 
 @click.group(cls=_DefaultGroup, invoke_without_command=True)
-@click.version_option(package_name="desksearch")
+@click.version_option(version=__version__, package_name="desksearch")
 def cli() -> None:
     """DeskSearch — private semantic search for your local files.
 

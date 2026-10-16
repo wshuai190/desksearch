@@ -25,17 +25,27 @@ LOCAL_PLUGIN_DIR = Path.home() / ".desksearch" / "plugins"
 
 
 def _load_entry_point_plugins() -> list[type[BasePlugin]]:
-    """Discover plugin classes advertised via ``entry_points``."""
+    """Discover plugin classes advertised via ``entry_points``.
+
+    Returns an empty list when entry points cannot be read: a PyInstaller
+    bundle ships no ``.dist-info`` metadata, and ``importlib.metadata`` can
+    raise there rather than simply finding nothing.
+    """
     plugins: list[type[BasePlugin]] = []
-    if sys.version_info >= (3, 10):
-        from importlib.metadata import entry_points
 
-        eps = entry_points(group=ENTRY_POINT_GROUP)
-    else:
-        from importlib.metadata import entry_points as _ep
+    try:
+        if sys.version_info >= (3, 10):
+            from importlib.metadata import entry_points
 
-        all_eps = _ep()
-        eps = all_eps.get(ENTRY_POINT_GROUP, [])
+            eps = entry_points(group=ENTRY_POINT_GROUP)
+        else:
+            from importlib.metadata import entry_points as _ep
+
+            all_eps = _ep()
+            eps = all_eps.get(ENTRY_POINT_GROUP, [])
+    except Exception as exc:
+        logger.debug("Entry point discovery unavailable: %s", exc)
+        return plugins
 
     for ep in eps:
         try:

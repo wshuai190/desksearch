@@ -130,3 +130,32 @@ class TestFoldersCommands:
         result = runner.invoke(cli, ["folders", "add", str(target)])
         assert result.exit_code == 0
         assert "Added" in result.output or "✓" in result.output
+
+
+class TestVersionCommand:
+    """Regression: --version must report the version of this source tree.
+
+    ``click.version_option(package_name=...)`` resolves the version through
+    ``importlib.metadata``, i.e. from whatever distribution happens to be
+    installed. That breaks in two situations:
+
+    * a PyInstaller bundle ships no ``.dist-info``, so the lookup raises
+      ``RuntimeError: 'desksearch' is not installed`` and the packaged CLI
+      exits with a traceback (reproduced with ``desksearch-backend.exe
+      --version``);
+    * a source checkout can disagree with an installed copy, as in this repo
+      where the editable install and the working tree had different versions.
+
+    Passing ``version=__version__`` reports the code that is actually running.
+    The frozen case itself is verified by building the bundle; this test
+    guards the drift case, which is cheap to reproduce anywhere.
+    """
+
+    def test_version_matches_the_source_tree(self, runner):
+        import desksearch
+
+        result = runner.invoke(cli, ["--version"])
+
+        assert result.exit_code == 0, result.output
+        assert desksearch.__version__ in result.output
+
